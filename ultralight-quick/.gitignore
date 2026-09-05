@@ -1,0 +1,6 @@
+# Ignore build/bin directories
+[Bb]uild/
+build_*/
+.DS_Store
+.vs/
+SDK/*

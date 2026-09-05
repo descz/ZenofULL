@@ -1,0 +1,17 @@
+/* Right surfaces expose the shared black-hole directly: no solid planes. */
+body:has(.empty-chat-stage) [data-nav-root],
+body:has(.empty-chat-stage) [data-panel-root],
+body:has(.empty-chat-stage) nav[aria-label="Panel surfaces"],
+body:has(.empty-chat-stage) [data-context-panel="true"],
+body:has(.empty-chat-stage) [data-context-panel="true"] header,
+body:has(.empty-chat-stage) [data-context-panel="true"] > div,
+body:has(.empty-chat-stage) [data-context-panel="true"] [class*="bg-[var(--surface-elevated)]"] {
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+body:has(.empty-chat-stage) [data-nav-root],
+body:has(.empty-chat-stage) [data-panel-root] { position: relative; z-index: 20; }
+body:has(.empty-chat-stage) nav[aria-label="Panel surfaces"] button { background: transparent !important; box-shadow: none !important; }
+body:has(.empty-chat-stage) nav[aria-label="Panel surfaces"] button:hover,
+body:has(.empty-chat-stage) nav[aria-label="Panel surfaces"] button[aria-pressed="true"] { background: rgb(255 255 255 / .08) !important; }

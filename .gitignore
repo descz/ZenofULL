@@ -1,0 +1,17 @@
+.env
+.env.*
+
+# Ambiente local / configs de CLI
+.zcode/
+
+# Backups e builds
+*.bak
+*.bak-*
+wails-app/build/bin/
+wails-app/frontend/dist/
+
+# Sistema
+Thumbs.db
+Desktop.ini
+
+!.env.example

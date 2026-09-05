@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Buraco Negro — Three.js — Escala de Cinza</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      color: #fff;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@latest/build/three.module.js';
+
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: 'high-performance'
+    });
+
+    renderer.setClearColor(0x000000, 1);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
+
+    const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.05, 1000);
+
+    let targetTheta = 0.12;
+    let targetPhi = 1.36;
+    let targetRadius = 20.5;
+
+    let theta = targetTheta;
+    let phi = targetPhi;
+    let radius = targetRadius;
+    const focusOffset = new THREE.Vector3(0, -3.4, 0);
+
+    const minRadius = 13.5;
+    const maxRadius = 28;
+
+    function updateCamera() {
+      theta += (targetTheta - theta) * 0.065;
+      phi += (targetPhi - phi) * 0.065;
+      radius += (targetRadius - radius) * 0.065;
+
+      const sp = Math.sin(phi);
+      camera.position.set(
+        radius * sp * Math.sin(theta),
+        radius * Math.cos(phi),
+        radius * sp * Math.cos(theta)
+      );
+
+      camera.lookAt(focusOffset);
+    }
+
+    function makeStars(count = 16000, minR = 65, maxR = 260) {
+      const positions = new Float32Array(count * 3);
+      const colors = new Float32Array(count * 3);
+      const sizes = new Float32Array(count);
+
+      for (let i = 0; i < count; i++) {
+        const u = Math.random();
+        const v = Math.random();
+        const w = Math.random();
+
+        const t = 2 * Math.PI * u;
+        const z = 2 * v - 1;
+        const s = Math.sqrt(1 - z * z);
+        const rr = minR + (maxR - minR) * Math.pow(w, 0.45);
+
+        positions[i * 3 + 0] = rr * s * Math.cos(t);
+        positions[i * 3 + 1] = rr * z;
+        positions[i * 3 + 2] = rr * s * Math.sin(t);
+
+        const brightness = 0.25 + Math.pow(Math.random(), 4.8) * 1.65;
+        colors[i * 3 + 0] = brightness;
+        colors[i * 3 + 1] = brightness;
+        colors[i * 3 + 2] = brightness;
+
+        sizes[i] = 0.45 + Math.pow(Math.random(), 6) * 2.2;
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      geo.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+
+      const mat = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        vertexColors: true,
+        uniforms: {
+          uPixelRatio: { value: Math.min(devicePixelRatio, 2) }
+        },
+        vertexShader: `
+          attribute float aSize;
+          varying vec3 vColor;
+          uniform float uPixelRatio;
+
+          void main() {
+            vColor = color;
+
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * mv;
+
+            float perspective = 180.0 / max(1.0, -mv.z);
+            gl_PointSize = clamp(aSize * perspective * uPixelRatio, 0.65, 4.0);
+          }
+        `,
+        fragmentShader: `
+          varying vec3 vColor;
+
+          void main() {
+            vec2 p = gl_PointCoord - 0.5;
+            float d = length(p);
+
+            float core = smoothstep(0.22, 0.0, d);
+            float halo = smoothstep(0.5, 0.05, d) * 0.35;
+
+            float alpha = core + halo;
+            if (alpha < 0.01) discard;
+
+            gl_FragColor = vec4(vColor * (0.75 + core * 1.8), alpha);
+          }
+        `
+      });
+
+      const points = new THREE.Points(geo, mat);
+      scene.add(points);
+      return points;
+    }
+
+    const stars = makeStars();
+
+    const dustGeo = new THREE.BufferGeometry();
+    const dustCount = 7000;
+    const dustPos = new Float32Array(dustCount * 3);
+    const dustCol = new Float32Array(dustCount * 3);
+
+    for (let i = 0; i < dustCount; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const rr = 95 + Math.random() * 150;
+      const y = (Math.random() - 0.5) * 20 + Math.sin(a * 2.0) * 4.0;
+
+      dustPos[i * 3 + 0] = Math.cos(a) * rr;
+      dustPos[i * 3 + 1] = y;
+      dustPos[i * 3 + 2] = Math.sin(a) * rr;
+
+      const b = 0.05 + Math.random() * 0.12;
+      dustCol[i * 3 + 0] = b;
+      dustCol[i * 3 + 1] = b;
+      dustCol[i * 3 + 2] = b;
+    }
+
+    dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+    dustGeo.setAttribute('color', new THREE.BufferAttribute(dustCol, 3));
+
+    const dustMat = new THREE.PointsMaterial({
+      size: 0.55,
+      sizeAttenuation: true,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    const dust = new THREE.Points(dustGeo, dustMat);
+    dust.rotation.z = -0.24;
+    scene.add(dust);
+
+    const DISK_INNER = 2.25;
+    const DISK_OUTER = 9.5;
+
+    const diskGeo = new THREE.RingGeometry(DISK_INNER, DISK_OUTER, 384, 1);
+
+    const diskMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 },
+        uInner: { value: DISK_INNER },
+        uOuter: { value: DISK_OUTER }
+      },
+      vertexShader: `
+        varying vec2 vLocal;
+        varying vec3 vWorld;
+
+        void main() {
+          vLocal = position.xy;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorld = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+
+        varying vec2 vLocal;
+        varying vec3 vWorld;
+
+        uniform float uTime;
+        uniform float uInner;
+        uniform float uOuter;
+
+        float hash(vec2 p) {
+          p = fract(p * vec2(123.34, 345.45));
+          p += dot(p, p + 34.345);
+          return fract(p.x * p.y);
+        }
+
+        float noise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+
+          float a = hash(i);
+          float b = hash(i + vec2(1.0, 0.0));
+          float c = hash(i + vec2(0.0, 1.0));
+          float d = hash(i + vec2(1.0, 1.0));
+
+          return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+        }
+
+        float fbm(vec2 p) {
+          float f = 0.0;
+          float amp = 0.5;
+          for (int i = 0; i < 5; i++) {
+            f += amp * noise(p);
+            p = p * 2.02 + vec2(17.1, 9.2);
+            amp *= 0.5;
+          }
+          return f;
+        }
+
+        vec3 grayscaleRamp(float t) {
+          float c = mix(0.18, 1.0, t);
+          return vec3(c);
+        }
+
+        void main() {
+          float r = length(vLocal);
+          float radial = (r - uInner) / (uOuter - uInner);
+          float a = atan(vLocal.y, vLocal.x);
+
+          float omega = 2.6 / pow(max(r, 0.8), 0.72);
+          float flow = a - uTime * omega;
+
+          vec2 p = vec2(flow * 2.5, radial * 32.0);
+
+          float n1 = fbm(p);
+          float n2 = fbm(vec2(flow * 6.0 - uTime * 0.08, radial * 78.0));
+          float filaments = smoothstep(0.28, 0.92, n1 * 0.72 + n2 * 0.55);
+
+          float rings =
+            0.63 +
+            0.24 * sin(radial * 120.0 - uTime * 0.7 + n1 * 4.0) +
+            0.12 * sin(radial * 260.0 + n2 * 8.0);
+
+          float innerFade = smoothstep(uInner, uInner + 0.42, r);
+          float outerFade = 1.0 - smoothstep(uOuter - 2.2, uOuter, r);
+
+          float heat = pow(1.0 - radial, 2.0);
+          heat = clamp(heat * 1.35 + 0.04, 0.0, 1.0);
+
+          float doppler = 0.62 + 0.78 * max(0.0, sin(a + 0.20));
+          doppler += 0.18 * sin(a + 0.20);
+
+          float intensity =
+            innerFade *
+            outerFade *
+            (0.35 + filaments * 1.2) *
+            max(0.15, rings) *
+            doppler;
+
+          float gaps = smoothstep(0.1, 0.9, noise(vec2(radial * 45.0, 4.0)));
+          intensity *= mix(0.78, 1.15, gaps);
+
+          vec3 col = grayscaleRamp(heat);
+          col *= 0.95 + heat * 2.8;
+          col *= intensity;
+
+          float alpha = clamp(intensity * (0.5 + heat), 0.0, 1.0);
+
+          if (alpha < 0.015) discard;
+          gl_FragColor = vec4(col, alpha);
+        }
+      `
+    });
+
+    const disk = new THREE.Mesh(diskGeo, diskMat);
+    disk.rotation.x = Math.PI * 0.5;
+    disk.rotation.z = 0.035;
+    scene.add(disk);
+
+    const innerGeo = new THREE.RingGeometry(2.06, 3.85, 320, 1);
+    const innerMat = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0 }
+      },
+      vertexShader: `
+        varying vec2 vPos;
+        void main() {
+          vPos = position.xy;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec2 vPos;
+        uniform float uTime;
+
+        void main() {
+          float r = length(vPos);
+          float a = atan(vPos.y, vPos.x);
+          float q = (r - 2.06) / (3.85 - 2.06);
+
+          float streak = 0.72 + 0.28 * sin(a * 22.0 - uTime * 2.4 - q * 32.0);
+          streak *= 0.8 + 0.2 * sin(a * 57.0 + q * 80.0);
+
+          float fade =
+            smoothstep(2.06, 2.20, r) *
+            (1.0 - smoothstep(3.35, 3.85, r));
+
+          float doppler = 0.55 + 1.15 * max(0.0, sin(a + 0.2));
+          float I = fade * streak * doppler;
+
+          float tone = mix(0.72, 1.0, pow(1.0 - q, 2.2));
+          vec3 col = vec3(tone);
+
+          gl_FragColor = vec4(col * I * 3.1, clamp(I, 0.0, 0.82));
+        }
+      `
+    });
+
+    const innerDisk = new THREE.Mesh(innerGeo, innerMat);
+    innerDisk.rotation.copy(disk.rotation);
+    innerDisk.position.y = 0.006;
+    scene.add(innerDisk);
+
+    const plasmaCount = 5200;
+    const plasmaGeo = new THREE.BufferGeometry();
+    const plasmaPos = new Float32Array(plasmaCount * 3);
+    const plasmaColor = new Float32Array(plasmaCount * 3);
+
+    for (let i = 0; i < plasmaCount; i++) {
+      const rr = 2.35 + Math.pow(Math.random(), 1.75) * 8.4;
+      const a = Math.random() * Math.PI * 2;
+      const thickness = 0.025 + (rr / 10.0) * 0.16;
+      const y = (Math.random() - 0.5) * thickness * (0.25 + Math.random());
+
+      plasmaPos[i * 3 + 0] = Math.cos(a) * rr;
+      plasmaPos[i * 3 + 1] = y;
+      plasmaPos[i * 3 + 2] = Math.sin(a) * rr;
+
+      const t = THREE.MathUtils.clamp(1.0 - (rr - 2.35) / 8.4, 0, 1);
+      const b = (0.35 + t * 0.65) * (0.7 + Math.random() * 0.75);
+      plasmaColor[i * 3 + 0] = b;
+      plasmaColor[i * 3 + 1] = b;
+      plasmaColor[i * 3 + 2] = b;
+    }
+
+    plasmaGeo.setAttribute('position', new THREE.BufferAttribute(plasmaPos, 3));
+    plasmaGeo.setAttribute('color', new THREE.BufferAttribute(plasmaColor, 3));
+
+    const plasmaMat = new THREE.PointsMaterial({
+      size: 0.022,
+      sizeAttenuation: true,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.75,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    const plasma = new THREE.Points(plasmaGeo, plasmaMat);
+    scene.add(plasma);
+
+    const renderTarget = new THREE.WebGLRenderTarget(
+      Math.floor(innerWidth * Math.min(devicePixelRatio, 2)),
+      Math.floor(innerHeight * Math.min(devicePixelRatio, 2)),
+      {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+        depthBuffer: true,
+        stencilBuffer: false
+      }
+    );
+
+    const postScene = new THREE.Scene();
+    const postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+    const postMat = new THREE.ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tScene: { value: renderTarget.texture },
+        uResolution: { value: new THREE.Vector2(innerWidth, innerHeight) },
+        uCenter: { value: new THREE.Vector2(0.5, 0.5) },
+        uHorizon: { value: 0.075 },
+        uTime: { value: 0 }
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position.xy, 0.0, 1.0);
+        }
+      `,
+      fragmentShader: `
+        precision highp float;
+
+        varying vec2 vUv;
+
+        uniform sampler2D tScene;
+        uniform vec2 uResolution;
+        uniform vec2 uCenter;
+        uniform float uHorizon;
+        uniform float uTime;
+
+        vec3 sampleScene(vec2 uv) {
+          return texture2D(tScene, clamp(uv, vec2(0.001), vec2(0.999))).rgb;
+        }
+
+        void main() {
+          float aspect = uResolution.x / uResolution.y;
+
+          vec2 d = vUv - uCenter;
+          vec2 da = vec2(d.x * aspect, d.y);
+          float r = length(da);
+
+          float h = max(uHorizon, 0.002);
+
+          float e = h * 2.35;
+          float outer = h * 8.5;
+
+          float safeR = max(r, h * 0.18);
+          float lensFactor = 1.0 - (e * e) / (safeR * safeR);
+
+          vec2 bentA = da * lensFactor;
+          vec2 bent = vec2(bentA.x / aspect, bentA.y);
+
+          float lensMix = 1.0 - smoothstep(e * 1.7, outer, r);
+          lensMix *= smoothstep(h * 0.93, h * 1.8, r);
+
+          vec2 warpedUv = mix(vUv, uCenter + bent, lensMix);
+
+          float chroma = exp(-pow((r - h * 1.42) / (h * 0.48), 2.0));
+          vec2 rd = normalize(d + vec2(1e-7)) * chroma * h * 0.018;
+
+          float sr = sampleScene(warpedUv + rd).r;
+          float sg = sampleScene(warpedUv).g;
+          float sb = sampleScene(warpedUv - rd).b;
+
+          float mono = (sr + sg + sb) / 3.0;
+          vec3 col = vec3(mono);
+
+          float nearShadow = smoothstep(h * 0.86, h * 1.75, r);
+          col *= mix(0.12, 1.0, nearShadow);
+
+          float photonRing = exp(-pow((r - h * 1.27) / (h * 0.058), 2.0));
+          float ringGlow = exp(-pow((r - h * 1.31) / (h * 0.22), 2.0));
+
+          float ang = atan(da.y, da.x);
+          float asym = 0.72 + 0.28 * sin(ang - 0.55);
+
+          vec3 ringColor = vec3(mix(0.82, 1.0, photonRing));
+
+          col += ringColor * photonRing * (4.6 + asym * 2.0);
+          col += vec3(0.45) * ringGlow * 0.46 * asym;
+
+          float shadow = 1.0 - smoothstep(h * 0.985, h * 1.015, r);
+          col *= 1.0 - shadow;
+
+          float rim = exp(-pow((r - h * 1.02) / (h * 0.035), 2.0));
+          col += vec3(0.03) * rim;
+
+          vec2 q = vUv - 0.5;
+          float vignette = 1.0 - smoothstep(0.30, 0.78, length(q));
+          col *= 0.68 + 0.32 * vignette;
+
+          float grain = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+          col += (grain - 0.5) / 255.0;
+
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `
+    });
+
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), postMat);
+    postScene.add(quad);
+
+    const bhCenterWorld = new THREE.Vector3(0, 0, 0);
+    const projectedCenter = new THREE.Vector3();
+    const projectedEdge = new THREE.Vector3();
+    const cameraRight = new THREE.Vector3();
+
+    const EVENT_HORIZON_WORLD_RADIUS = 1.38;
+
+    function updateLensProjection() {
+      camera.updateMatrixWorld();
+
+      projectedCenter.copy(bhCenterWorld).project(camera);
+
+      cameraRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+      const edgeWorld = cameraRight.clone().multiplyScalar(EVENT_HORIZON_WORLD_RADIUS).add(bhCenterWorld);
+
+      projectedEdge.copy(edgeWorld).project(camera);
+
+      const centerUvX = projectedCenter.x * 0.5 + 0.5;
+      const centerUvY = projectedCenter.y * 0.5 + 0.5;
+
+      const edgeUvX = projectedEdge.x * 0.5 + 0.5;
+      const screenRadiusX = Math.abs(edgeUvX - centerUvX);
+      const aspect = innerWidth / innerHeight;
+      const aspectCorrectRadius = screenRadiusX * aspect;
+
+      postMat.uniforms.uCenter.value.set(centerUvX, centerUvY);
+      postMat.uniforms.uHorizon.value = Math.max(aspectCorrectRadius, 0.001);
+    }
+
+    let dragging = false;
+    let lastX = 0;
+    let lastY = 0;
+    let userActiveUntil = 0;
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      renderer.domElement.setPointerCapture(e.pointerId);
+      userActiveUntil = performance.now() + 6000;
+    });
+
+    renderer.domElement.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+
+      targetTheta -= dx * 0.0052;
+      targetPhi -= dy * 0.0042;
+      targetPhi = THREE.MathUtils.clamp(targetPhi, 0.48, 2.66);
+
+      userActiveUntil = performance.now() + 6000;
+    });
+
+    renderer.domElement.addEventListener('pointerup', (e) => {
+      dragging = false;
+      userActiveUntil = performance.now() + 4500;
+      try { renderer.domElement.releasePointerCapture(e.pointerId); } catch {}
+    });
+
+    const applyWheelZoom = (deltaY) => {
+      targetRadius *= Math.exp(deltaY * 0.001);
+      targetRadius = THREE.MathUtils.clamp(targetRadius, minRadius, maxRadius);
+      userActiveUntil = performance.now() + 4500;
+    };
+
+    renderer.domElement.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      applyWheelZoom(e.deltaY);
+    }, { passive: false });
+
+    addEventListener('message', (event) => {
+      const data = event.data;
+      if (!data || data.source !== 'zeno-black-hole') return;
+      if (data.type === 'wheel') applyWheelZoom(Number(data.deltaY) || 0);
+      if (data.type === 'drag') {
+        targetTheta -= (Number(data.dx) || 0) * 0.0052;
+        targetPhi -= (Number(data.dy) || 0) * 0.0042;
+        targetPhi = THREE.MathUtils.clamp(targetPhi, 0.48, 2.66);
+        userActiveUntil = performance.now() + 6000;
+      }
+    });
+
+    function resize() {
+      const w = innerWidth;
+      const h = innerHeight;
+      const dpr = Math.min(devicePixelRatio, 2);
+
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+
+      renderer.setPixelRatio(dpr);
+      renderer.setSize(w, h);
+
+      renderTarget.setSize(
+        Math.floor(w * dpr),
+        Math.floor(h * dpr)
+      );
+
+      postMat.uniforms.uResolution.value.set(w, h);
+      stars.material.uniforms.uPixelRatio.value = dpr;
+    }
+
+    addEventListener('resize', resize);
+
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const t = clock.getElapsedTime();
+
+      if (!dragging && performance.now() > userActiveUntil) {
+        targetTheta += 0.00055;
+        targetPhi = 1.34 + Math.sin(t * 0.11) * 0.10;
+      }
+
+      updateCamera();
+      updateLensProjection();
+
+      diskMat.uniforms.uTime.value = t;
+      innerMat.uniforms.uTime.value = t;
+      postMat.uniforms.uTime.value = t;
+
+      plasma.rotation.y = t * 0.13;
+      dust.rotation.y = t * 0.0025;
+      stars.rotation.y = t * 0.0015;
+
+      renderer.setRenderTarget(renderTarget);
+      renderer.clear();
+      renderer.render(scene, camera);
+
+      renderer.setRenderTarget(null);
+      renderer.clear();
+      renderer.render(postScene, postCamera);
+    }
+
+    updateCamera();
+    resize();
+    animate();
+  </script>
+</body>
+</html>

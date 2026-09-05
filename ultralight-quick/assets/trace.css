@@ -1,0 +1,31 @@
+/* Conversation trace: visual language follows event semantics. */
+.panel-chat-trigger { color: var(--foreground); }
+.trace-entry { border: 1px solid var(--interactive-border); border-left-width: 3px; border-radius: 8px; background: var(--surface-elevated); overflow: hidden; }
+.trace-entry button { color: var(--foreground); }
+.trace-entry:hover { background: var(--interactive-hover); }
+.trace-entry-icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 6px; flex: 0 0 auto; }
+.trace-input { border-left-color: #6b7280; }
+.trace-input .trace-entry-icon { color: #6b7280; background: color-mix(in srgb, #6b7280 14%, transparent); }
+.trace-output { border-left-color: #2563eb; }
+.trace-output .trace-entry-icon { color: #2563eb; background: color-mix(in srgb, #2563eb 14%, transparent); }
+.trace-thinking { border-left-color: #a855f7; }
+.trace-thinking .trace-entry-icon { color: #a855f7; background: color-mix(in srgb, #a855f7 14%, transparent); }
+.trace-tool { border-left-color: #d97706; }
+.trace-tool .trace-entry-icon { color: #d97706; background: color-mix(in srgb, #d97706 14%, transparent); }
+.trace-entry-details { border-top: 1px solid var(--interactive-border); padding: 9px 10px 10px 38px; background: var(--background); }
+.trace-detail-label { margin: 4px 0 5px; color: var(--muted-foreground); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.trace-entry-details pre { margin: 0 0 8px; color: var(--foreground); font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Every lateral surface keeps its own semantic accent instead of a generic icon treatment. */
+nav[aria-label="Panel surfaces"] .panel-context { --panel-accent: #2563eb; }
+nav[aria-label="Panel surfaces"] .panel-git,
+nav[aria-label="Panel surfaces"] .panel-pull-request,
+nav[aria-label="Panel surfaces"] .panel-changes { --panel-accent: #f59e0b; }
+nav[aria-label="Panel surfaces"] .panel-stack { --panel-accent: #8b5cf6; }
+nav[aria-label="Panel surfaces"] .panel-files { --panel-accent: #0ea5e9; }
+nav[aria-label="Panel surfaces"] .panel-terminal { --panel-accent: #22c55e; }
+nav[aria-label="Panel surfaces"] .panel-project-notes { --panel-accent: #ec4899; }
+nav[aria-label="Panel surfaces"] .panel-browser { --panel-accent: #14b8a6; }
+nav[aria-label="Panel surfaces"] .panel-chat { --panel-accent: #a855f7; }
+nav[aria-label="Panel surfaces"] button:hover,
+nav[aria-label="Panel surfaces"] button[aria-pressed="true"] { color: #fff; }

@@ -9,6 +9,18 @@
   const now = () => new Date();
   const fmtTime = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const uid = () => Math.random().toString(36).slice(2, 10);
+  const relTime = (s) => {
+    const ts = s.updatedAt || s.createdAt;
+    if (!ts) return s.time || '';
+    const diff = Date.now() - new Date(ts).getTime();
+    if (!(diff >= 0)) return '';
+    const min = Math.floor(diff / 60000);
+    if (min < 1) return 'agora';
+    if (min < 60) return `${min}min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `${h}h`;
+    return `${Math.floor(h / 24)}d`;
+  };
 
   const LS = {
     get(k, fb) { try { const v = localStorage.getItem(k); return v === null ? fb : JSON.parse(v); } catch { return fb; } },
@@ -19,6 +31,7 @@
   const SEED_SESSIONS = [
     {
       id: 'ses_clone_1', title: 'Teste Clone', active: true,
+      createdAt: new Date(Date.now() - 19 * 60000).toISOString(),
       messages: [
         { role: 'user', text: 'Explique o que é um for loop em JavaScript com um exemplo curto de código. Uma linha só.', time: '4:33 PM' },
         {
@@ -30,8 +43,8 @@
         },
       ],
     },
-    { id: 'ses_clone_2', title: 'Responder apenas OK', messages: [] },
-    { id: 'ses_clone_3', title: 'Mensagem de saudação', messages: [] },
+    { id: 'ses_clone_2', title: 'Responder apenas OK', createdAt: new Date(Date.now() - 60 * 60000).toISOString(), messages: [] },
+    { id: 'ses_clone_3', title: 'Mensagem de saudação', createdAt: new Date(Date.now() - 5 * 3600000).toISOString(), messages: [] },
   ];
 
   const CHIPS = [
@@ -245,6 +258,13 @@
   };
 
   if (!['chat', 'memory'].includes(state.workspace)) state.workspace = 'chat';
+  {
+    let sessionsTouched = false;
+    state.sessions.forEach((session) => {
+      if (!session.createdAt) { session.createdAt = new Date().toISOString(); sessionsTouched = true; }
+    });
+    if (sessionsTouched) LS.set('oc-clone-sessions', state.sessions);
+  }
   if (!Array.isArray(state.memoryNotes) || !state.memoryNotes.length) state.memoryNotes = MEMORY_NOTES;
   else {
     const storedMemoryIds = new Set(state.memoryNotes.map((note) => note.id));
@@ -286,6 +306,7 @@
       id: 'ses_' + uid(),
       title: project ? `New chat · ${project.name}` : `New chat ${state.sessions.length + 1}`,
       messages: [],
+      createdAt: new Date().toISOString(),
       ...(project ? { projectId: project.id } : {}),
     };
     state.sessions.unshift(session);
@@ -544,17 +565,16 @@
     const active = s.id === state.activeId;
     return `
       <div role="button" tabindex="0" data-session-id="${s.id}">
-        <div data-session-row="${s.id}" class="group relative my-0.5 flex cursor-pointer items-center rounded-md py-1 pr-1.5 ${active ? 'bg-primary/10' : ''}" style="padding-left: ${indent}px;">
+        <div data-session-row="${s.id}" class="zeno-session-row group relative my-0.5 flex cursor-pointer items-center rounded-md py-1 pr-1.5 ${active ? 'bg-primary/10' : ''}" style="padding-left: ${indent}px;">
           <div class="flex min-w-0 flex-1 items-center">
-            <button type="button" data-action="open-session" class="flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden text-left focus-visible:outline-none text-foreground select-none transition-[padding] group-hover:pr-7 group-focus-within:pr-7">
+            <button type="button" data-action="open-session" class="flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden text-left focus-visible:outline-none text-foreground select-none">
               <div class="flex w-full items-center min-w-0 flex-1 gap-1 overflow-hidden">
                 <div class="block min-w-0 flex-1 truncate typography-ui-label font-normal ${active ? 'text-primary' : 'text-foreground/80'}">${esc(s.title)}</div>
               </div>
             </button>
           </div>
-          <div class="absolute right-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5 transition-opacity opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto">
-            <button type="button" data-action="archive-session" class="inline-flex items-center justify-center rounded-md focus-visible:outline-none transition-opacity text-muted-foreground hover:text-foreground h-4 w-4" aria-label="Archive session" title="Archive session">${icon('oc-archive', 'remixicon h-3.5 w-3.5')}</button>
-          </div>
+          <span class="zeno-chat-time">${esc(relTime(s))}</span>
+          <button type="button" data-session-menu="${s.id}" class="zeno-chat-menu" aria-label="Chat options" title="Options">${icon('oc-more', 'remixicon h-4 w-4')}</button>
         </div>
       </div>`;
   };
@@ -567,9 +587,8 @@
         <button type="button" data-project-open="${project.id}" class="zeno-project-open" aria-label="Edit project ${esc(project.name)}" title="Edit project">
           <span class="zeno-sidebar-nav-icon">${icon('oc-folder', 'remixicon h-4 w-4')}</span>
           <span class="min-w-0 flex-1 truncate">${esc(project.name)}</span>
-          <span class="zeno-project-count">${chats.length}</span>
         </button>
-        <button type="button" data-project-new-chat="${project.id}" class="zeno-sidebar-tool zeno-project-add" aria-label="New chat in ${esc(project.name)}" title="New chat in project">${icon('oc-add', 'remixicon h-3.5 w-3.5')}</button>
+        <button type="button" data-project-menu="${project.id}" class="zeno-sidebar-tool zeno-project-add" aria-label="Project options" title="Options">${icon('oc-more', 'remixicon h-3.5 w-3.5')}</button>
       </div>
       ${chats.length ? `<div class="zeno-project-chats">${chats.map((chat) => tplSessionRow(chat, 34)).join('')}</div>` : '<div class="zeno-project-empty">No chats yet</div>'}
     </div>`;
@@ -921,6 +940,18 @@
 
   const PROJECT_FOLDERS = ['GUI Zeno', 'Downloads', 'Pictures', 'Documents', 'Projects', 'Desktop'];
 
+  const tplMenuPopover = (items) => {
+    const anchor = state.modalAnchor || { x: 12, y: 64, w: 24, h: 24 };
+    const width = 190;
+    const height = items.length * 38 + 14;
+    let left = anchor.x + anchor.w + 8;
+    let top = anchor.y - 6;
+    if (left + width > window.innerWidth - 8) left = Math.max(8, anchor.x - width - 8);
+    if (top + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8);
+    if (top < 8) top = 8;
+    return `<div class="fixed inset-0 z-[80]" data-action-modal><div role="menu" class="oc-menu" style="position:fixed;left:${left}px;top:${top}px;min-width:${width}px;">${items.map(([action, ic, label, danger]) => `<button type="button" role="menuitem" data-menu-action="${action}" class="oc-menu-item${danger ? ' oc-menu-item-danger' : ''}">${icon(ic, 'remixicon h-4 w-4')}<span>${label}</span></button>`).join('')}</div></div>`;
+  };
+
   const tplActionModal = () => {
     if (!state.modal) return '';
     let title = '', body = '';
@@ -945,6 +976,35 @@
             </div>
             <aside class="project-dialog-aside"><div class="project-aside-icon">${icon('oc-folder-add', 'remixicon h-6 w-6')}</div><strong>One context, many chats</strong><p>Os chats criados dentro deste projeto vão compartilhar as pastas selecionadas sem misturar o restante do seu workspace.</p><div class="project-aside-rule"></div><span>${icon('oc-information', 'remixicon h-3.5 w-3.5')} Stored locally in this browser</span></aside>
             <footer class="project-dialog-footer"><button type="button" data-action="close-modal" class="project-secondary-button">Cancel</button><button type="submit" class="project-primary-button">${editing ? 'Save changes' : 'Create project'} ${icon('oc-arrow-right', 'remixicon h-3.5 w-3.5')}</button></footer>
+          </form>
+        </div>
+      </div>`;
+    }
+    if (state.modal === 'chat-menu') {
+      return tplMenuPopover([
+        ['rename', 'oc-edit', 'Rename'],
+        ['archive', 'oc-archive', 'Archive'],
+        ['delete', 'oc-delete-bin', 'Delete', true],
+      ]);
+    }
+    if (state.modal === 'project-menu') {
+      return tplMenuPopover([
+        ['new-chat', 'oc-chat-new', 'New chat'],
+        ['rename', 'oc-edit', 'Rename'],
+        ['delete', 'oc-delete-bin', 'Delete project', true],
+      ]);
+    }
+    if (state.modal === 'rename-session') {
+      const session = state.sessions.find((item) => item.id === state.menuId);
+      return `<div class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-3 backdrop-blur-[3px] oc-backdrop" data-action-modal>
+        <div role="dialog" aria-modal="true" aria-label="Rename chat" class="oc-dialog rename-dialog">
+          <header class="project-dialog-header"><div><h2>Rename chat</h2></div><button type="button" data-action="close-modal" aria-label="Close dialog" class="memory-icon-button">${icon('oc-close', 'remixicon h-4 w-4')}</button></header>
+          <form data-rename-form class="project-dialog-form">
+            <div class="project-form-main">
+              <label class="project-field"><span>Title</span><input required data-rename-name class="project-title-input" value="${esc(session ? session.title : '')}" autocomplete="off"></label>
+              <p class="project-form-error" data-rename-error role="alert"></p>
+            </div>
+            <footer class="project-dialog-footer"><button type="button" data-action="close-modal" class="project-secondary-button">Cancel</button><button type="submit" class="project-primary-button">Save</button></footer>
           </form>
         </div>
       </div>`;
@@ -1537,7 +1597,7 @@
   const bindSidebar = (rootEl) => {
     $$('[data-session-id]', rootEl).forEach((row) => row.addEventListener('click', (e) => {
       const b = e.target.closest('button');
-      if (b && b.getAttribute('aria-label') !== 'Archive' && b.getAttribute('aria-label') !== 'Archive session' && b.getAttribute('aria-label') !== 'Session menu') {
+      if (!b || b.dataset.action === 'open-session') {
         state.activeId = row.dataset.sessionId;
         const session = state.sessions.find((item) => item.id === state.activeId);
         state.activeProjectId = session?.projectId || null;
@@ -1571,30 +1631,6 @@
       state.modalAnchor = null;
       render();
     }));
-    $$('[data-project-new-chat]', rootEl).forEach((button) => button.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const project = state.projects.find((item) => item.id === button.dataset.projectNewChat);
-      if (!project) return;
-      state.activeProjectId = project.id;
-      state.workspace = 'chat';
-      state.noteId = null;
-      state.panel = null;
-      createSession(project.id);
-      persistWorkspace();
-      render();
-    }));
-    $$('[data-action="archive-session"]', rootEl).forEach((button) => button.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const id = button.closest('[data-session-row]').dataset.sessionRow;
-      const index = state.sessions.findIndex((s) => s.id === id);
-      if (index < 0) return;
-      const [session] = state.sessions.splice(index, 1);
-      state.archivedSessions.unshift(session);
-      if (state.activeId === id) state.activeId = state.sessions[0]?.id || null;
-      LS.set('oc-clone-sessions', state.sessions);
-      LS.set('oc-clone-archived-sessions', state.archivedSessions);
-      render();
-    }));
     const openSidebarPopup = (button, modal, above = false) => {
       const rect = button.getBoundingClientRect();
       state.modalAnchor = { x: rect.x, y: rect.y, w: rect.width, h: rect.height, above };
@@ -1604,6 +1640,16 @@
     $$('[data-action="add-project"]', rootEl).forEach((button) => button.addEventListener('click', (event) => openSidebarPopup(event.currentTarget, 'project')));
     $('[data-action="archive-popup"]', rootEl)?.addEventListener('click', (event) => openSidebarPopup(event.currentTarget, 'archive'));
     $('[data-action="search-sessions"]', rootEl)?.addEventListener('click', (event) => openSidebarPopup(event.currentTarget, 'search'));
+    $$('[data-session-menu]', rootEl).forEach((button) => button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      state.menuId = button.dataset.sessionMenu;
+      openSidebarPopup(event.currentTarget, 'chat-menu');
+    }));
+    $$('[data-project-menu]', rootEl).forEach((button) => button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      state.menuId = button.dataset.projectMenu;
+      openSidebarPopup(event.currentTarget, 'project-menu');
+    }));
     $('[data-chats-toggle]', rootEl)?.addEventListener('click', () => {
       state.chatsCollapsed = !state.chatsCollapsed;
       LS.set('oc-clone-chats-collapsed', state.chatsCollapsed);
@@ -1653,8 +1699,42 @@
     }));
   };
 
+  const closeMenu = () => { state.modal = null; state.modalAnchor = null; state.menuId = null; state.editProjectId = null; };
+  const archiveSessionById = (id) => {
+    const index = state.sessions.findIndex((s) => s.id === id);
+    if (index >= 0) {
+      const [session] = state.sessions.splice(index, 1);
+      state.archivedSessions.unshift(session);
+      if (state.activeId === id) state.activeId = state.sessions[0]?.id || null;
+      LS.set('oc-clone-sessions', state.sessions);
+      LS.set('oc-clone-archived-sessions', state.archivedSessions);
+    }
+    closeMenu();
+    render();
+  };
+  const deleteSessionById = (id) => {
+    state.sessions = state.sessions.filter((s) => s.id !== id);
+    if (state.activeId === id) state.activeId = state.sessions[0]?.id || null;
+    LS.set('oc-clone-sessions', state.sessions);
+    LS.set('oc-clone-active', state.activeId);
+    closeMenu();
+    render();
+  };
+  const deleteProjectById = (id) => {
+    state.projects = state.projects.filter((p) => p.id !== id);
+    state.sessions = state.sessions.filter((s) => s.projectId !== id);
+    if (state.activeProjectId === id) state.activeProjectId = null;
+    if (state.activeId && !state.sessions.some((s) => s.id === state.activeId)) state.activeId = state.sessions[0]?.id || null;
+    LS.set('oc-clone-projects', state.projects);
+    LS.set('oc-clone-sessions', state.sessions);
+    LS.set('oc-clone-active-project', state.activeProjectId);
+    LS.set('oc-clone-active', state.activeId);
+    closeMenu();
+    render();
+  };
+
   const bindActionModal = (rootEl) => {
-    const closeActionModal = () => { state.modal = null; state.modalAnchor = null; state.editProjectId = null; render(); };
+    const closeActionModal = () => { closeMenu(); render(); };
     $$('[data-action="close-modal"]', rootEl).forEach((button) => button.addEventListener('click', closeActionModal));
     rootEl.addEventListener('mousedown', (event) => { if (event.target === rootEl) closeActionModal(); });
     $('[data-project-form]', rootEl)?.addEventListener('submit', (event) => {
@@ -1700,6 +1780,53 @@
       const label = $('[data-project-folder-count]', rootEl);
       if (label) label.textContent = `${count} selected`;
     }));
+    $$('[data-menu-action]', rootEl).forEach((button) => button.addEventListener('click', () => {
+      const action = button.dataset.menuAction;
+      const id = state.menuId;
+      if (state.modal === 'chat-menu') {
+        if (action === 'rename') { state.modal = 'rename-session'; state.modalAnchor = null; render(); return; }
+        if (action === 'archive') { archiveSessionById(id); return; }
+        if (action === 'delete') { deleteSessionById(id); return; }
+      }
+      if (state.modal === 'project-menu') {
+        if (action === 'new-chat') {
+          const project = state.projects.find((item) => item.id === id);
+          if (project) {
+            state.activeProjectId = project.id;
+            state.workspace = 'chat';
+            state.noteId = null;
+            state.panel = null;
+            createSession(project.id);
+            persistWorkspace();
+          }
+          closeMenu();
+          render();
+          return;
+        }
+        if (action === 'rename') { state.modal = 'project-edit'; state.editProjectId = id; state.modalAnchor = null; render(); return; }
+        if (action === 'delete') { deleteProjectById(id); return; }
+      }
+      closeMenu();
+      render();
+    }));
+    $('[data-rename-form]', rootEl)?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const name = $('[data-rename-name]', rootEl).value.trim();
+      const error = $('[data-rename-error]', rootEl);
+      if (!name) {
+        if (error) error.textContent = 'Give this chat a title.';
+        return;
+      }
+      const session = state.sessions.find((item) => item.id === state.menuId);
+      const id = state.menuId;
+      closeMenu();
+      if (session) {
+        session.title = name;
+        LS.set('oc-clone-sessions', state.sessions);
+      }
+      if (state.activeId === id) LS.set('oc-clone-active', state.activeId);
+      render();
+    });
     $$('[data-action="restore-session"]', rootEl).forEach((button) => button.addEventListener('click', () => {
       const index = state.archivedSessions.findIndex((s) => s.id === button.dataset.sessionId);
       if (index < 0) return;

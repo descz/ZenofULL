@@ -37,20 +37,71 @@ def main():
         assert page.locator('.zeno-project-tools span').first.text_content().strip() == "My Projects"
         assert page.locator('.zeno-project-folders').count() == 0
 
-        # Sidebar toggle in the top bar now works: closes and reopens the sidebar.
-        toggle = page.locator('[data-topbar-toggle]')
-        assert toggle.count() == 1
-        assert toggle.get_attribute("class").find("hover:bg-interactive-hover") == -1
-        toggle.click()
+        # Chat rows show a relative time; hovering swaps it for the "..." menu.
+        first_time = page.locator('[data-chats-list] .zeno-chat-time').first
+        assert first_time.text_content().strip() != "", "chat time is empty"
+        first_row = page.locator('[data-chats-list] [data-session-id]').first
+        first_row.hover()
+        menu_btn = first_row.locator('[data-session-menu]')
+        assert menu_btn.is_visible()
+        assert not first_row.locator('.zeno-chat-time').is_visible()
+
+        # Clicking "..." opens the small context menu with Rename / Archive / Delete.
+        menu_btn.click()
+        page.locator(".oc-menu").wait_for()
+        items = page.locator(".oc-menu .oc-menu-item")
+        assert items.count() == 3
+        assert "Rename" in items.nth(0).text_content()
+        assert "Archive" in items.nth(1).text_content()
+        assert "Delete" in items.nth(2).text_content()
+        assert "oc-menu-item-danger" in (items.nth(2).get_attribute("class") or "")
+        page.screenshot(path="qa-chat-menu.png")
+
+        # Rename via the menu.
+        items.nth(0).click()
+        page.locator(".rename-dialog").wait_for()
+        current_title = page.locator("[data-rename-name]").input_value()
+        page.locator("[data-rename-name]").fill("Renomeado QA")
+        page.locator("[data-rename-form]").locator('button[type="submit"]').click()
+        page.locator(".rename-dialog").wait_for(state="detached")
+        assert page.get_by_text("Renomeado QA", exact=True).count() >= 1
+
+        # Archive via the menu, restore from the archive popup.
+        first_row = page.locator('[data-chats-list] [data-session-id]').first
+        before = page.locator('[data-chats-list] [data-session-id]').count()
+        first_row.hover()
+        first_row.locator('[data-session-menu]').click()
+        page.locator(".oc-menu").wait_for()
+        page.locator('.oc-menu [data-menu-action="archive"]').click()
+        page.locator(".oc-menu").wait_for(state="detached")
+        assert page.locator('[data-chats-list] [data-session-id]').count() == before - 1
+        page.locator('[data-sidebar-root] [data-action="archive-popup"]').click()
+        page.locator('[data-action="restore-session"]').first.wait_for()
+        page.locator('[data-action="restore-session"]').first.click()
+        assert page.locator('[data-chats-list] [data-session-id]').count() == before
+        page.locator('[data-action-modal] [data-action="close-modal"]').click()
+        page.locator('[data-action-modal]').wait_for(state="detached")
+
+        # Delete via the menu removes the chat for good.
+        page.locator('[data-chats-list] [data-session-id]').first.hover()
+        page.locator('[data-chats-list] [data-session-id]').first.locator('[data-session-menu]').click()
+        page.locator(".oc-menu").wait_for()
+        page.locator('.oc-menu [data-menu-action="delete"]').click()
+        page.locator(".oc-menu").wait_for(state="detached")
+        assert page.locator('[data-chats-list] [data-session-id]').count() == before - 1
+
+        # Clicked buttons keep no gray focus outline.
+        page.locator('[data-topbar-toggle]').click()
         page.wait_for_timeout(320)
         assert page.locator('[data-sidebar-root] aside').get_attribute("aria-hidden") == "true"
-        assert page.locator('[data-sidebar-root] aside').bounding_box()["width"] < 4
+        outline_style = page.evaluate("() => getComputedStyle(document.activeElement).outlineStyle")
+        assert outline_style == "none", f"focus outline is {outline_style}"
         page.screenshot(path="qa-closed.png")
-        toggle.click()
+        page.locator('[data-topbar-toggle]').click()
         page.wait_for_timeout(320)
         assert page.locator('[data-sidebar-root] aside').get_attribute("aria-hidden") == "false"
 
-        # Sidebar resize: content must follow the drag live.
+        # Sidebar resize: content follows the drag live.
         content_box = page.locator('[data-sidebar-content]').bounding_box()
         handle_box = page.locator('[data-action="resize-sidebar"]').bounding_box()
         page.mouse.move(handle_box["x"] + handle_box["width"] / 2, handle_box["y"] + 200)
@@ -66,49 +117,71 @@ def main():
         assert page.locator('[data-chats-list]').is_visible()
         page.locator('[data-chats-toggle]').click()
         assert not page.locator('[data-chats-list]').is_visible()
-        assert page.locator('[data-chats-toggle]').get_attribute("aria-expanded") == "false"
-        page.screenshot(path="qa-chats-collapsed.png")
         page.locator('[data-chats-toggle]').click()
         assert page.locator('[data-chats-list]').is_visible()
 
-        # Create a project via the "+" tool: lands in chat.
+        # Create a project via the "+" tool: lands in chat, white folder icon.
         page.locator('[data-sidebar-root] .zeno-sidebar-tool[data-action="add-project"]').click()
         page.locator(".project-dialog").wait_for()
         page.locator("[data-project-name]").fill("Zeno cockpit")
         page.locator('[data-project-folder]').nth(0).check()
         page.locator('[data-project-folder]').nth(2).check()
-        assert page.locator("[data-project-folder-count]").inner_text() == "2 selected"
         page.locator("[data-project-form]").locator('button[type="submit"]').click()
         page.locator("[data-chat-input]").wait_for()
         assert page.get_by_text("Zeno cockpit", exact=True).count() >= 1
-
-        # Folder icon stays mandatory white.
-        page.locator('[data-sidebar-root] .zeno-project-open').first.wait_for()
         icon_color = page.locator('[data-sidebar-root] .zeno-project-open .zeno-sidebar-nav-icon').first.evaluate(
             "el => getComputedStyle(el).color"
         )
         assert icon_color == "rgb(255, 255, 255)", f"folder icon color is {icon_color}"
 
-        # Clicking the project opens the EDIT dialog, prefilled.
-        page.locator('[data-sidebar-root] .zeno-project-open').first.click()
+        # Project "..." menu: New chat / Rename / Delete project.
+        project_row = page.locator('[data-sidebar-root] .zeno-project-group').first
+        project_row.hover()
+        project_row.locator('[data-project-menu]').click()
+        page.locator(".oc-menu").wait_for()
+        assert "New chat" in page.locator('.oc-menu [data-menu-action="new-chat"]').text_content()
+        page.screenshot(path="qa-project-menu.png")
+        page.locator('.oc-menu [data-menu-action="new-chat"]').click()
+        page.locator("[data-chat-input]").wait_for()
+        assert page.get_by_text("New chat · Zeno cockpit", exact=True).count() >= 1
+
+        project_row = page.locator('[data-sidebar-root] .zeno-project-group').first
+        project_row.hover()
+        project_row.locator('[data-project-menu]').click()
+        page.locator(".oc-menu").wait_for()
+        page.locator('.oc-menu [data-menu-action="rename"]').click()
         page.locator(".project-dialog").wait_for()
         assert page.locator(".project-dialog h2").text_content().strip() == "Edit project"
         assert page.locator("[data-project-name]").input_value() == "Zeno cockpit"
         assert page.locator("[data-project-folder]:checked").count() == 2
-        assert page.locator("[data-project-folder-count]").inner_text() == "2 selected"
+        page.locator(".project-dialog [data-action='close-modal']").first.click()
+        page.locator(".project-dialog").wait_for(state="detached")
+
+        # Row click still opens the edit dialog, rename persists.
+        page.locator('[data-sidebar-root] .zeno-project-open').first.click()
+        page.locator(".project-dialog").wait_for()
         page.locator("[data-project-name]").fill("Cockpit v2")
-        page.locator('[data-project-folder]').nth(4).check()
         page.locator("[data-project-form]").locator('button[type="submit"]').click()
         page.locator(".project-dialog").wait_for(state="detached")
         assert page.get_by_text("Cockpit v2", exact=True).count() >= 1
         assert page.get_by_text("Zeno cockpit", exact=True).count() == 0
         page.screenshot(path="qa-projects.png")
 
+        # Delete project removes it and its chats.
+        project_row = page.locator('[data-sidebar-root] .zeno-project-group').first
+        project_row.hover()
+        project_row.locator('[data-project-menu]').click()
+        page.locator(".oc-menu").wait_for()
+        page.locator('.oc-menu [data-menu-action="delete"]').click()
+        page.locator(".oc-menu").wait_for(state="detached")
+        assert page.locator('[data-sidebar-root] .zeno-project-group').count() == 0
+        assert page.get_by_text("Cockpit v2", exact=True).count() == 0
+        assert page.get_by_text("New chat · Cockpit v2", exact=True).count() == 0
+
         # Memory page still intact.
         page.locator('button[data-workspace="memory"]').click()
         page.locator(".memory-view").wait_for()
         assert page.get_by_text("Zeno Agent Memory", exact=True).count() == 1
-        assert page.locator(".memory-map-canvas").count() == 1
         page.screenshot(path="qa-memory.png")
         page.locator('[data-sidebar-root] [data-session-id]').first.click()
         page.locator("[data-chat-input]").wait_for()

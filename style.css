@@ -192,6 +192,18 @@ nav[aria-label="Panel surfaces"] button {
   transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms ease, background-color 150ms ease;
 }
 
+/* ============ SEM CONTORNO DE FOCO (nada de borda cinza ao clicar) ============ */
+button:focus,
+button:focus-visible,
+[role="button"]:focus,
+[role="button"]:focus-visible,
+[role="menuitem"]:focus,
+[role="menuitem"]:focus-visible,
+[tabindex]:focus,
+[tabindex]:focus-visible {
+  outline: none !important;
+}
+
 /* ============ STACKING / DIALOG / MENU ============ */
 [data-settings-backdrop] {
   position: fixed !important;
@@ -562,9 +574,28 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
 .zeno-project-open .zeno-sidebar-nav-icon {
   color: #ffffff;
 }
-.zeno-project-count {
+.zeno-chat-time {
+  flex: 0 0 auto;
+  padding-right: 3px;
   color: var(--muted-foreground);
-  font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.zeno-chat-menu {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  color: var(--muted-foreground);
+}
+.zeno-session-row:hover .zeno-chat-menu,
+.zeno-session-row:focus-within .zeno-chat-menu {
+  display: inline-flex;
+}
+.zeno-session-row:hover .zeno-chat-time {
+  display: none;
 }
 .zeno-project-add {
   opacity: 0;
@@ -584,6 +615,47 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   color: color-mix(in srgb, var(--muted-foreground) 72%, transparent);
   font-size: 10px;
   font-style: italic;
+}
+
+/* ============ MENU DE CONTEXTO (popup dos 3 pontos) ============ */
+.oc-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-elevated);
+  box-shadow: 0 18px 44px rgb(0 0 0 / .35);
+  z-index: 80;
+}
+.oc-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--foreground);
+  font-size: 13px;
+  text-align: left;
+}
+.oc-menu-item .remixicon {
+  color: var(--muted-foreground);
+}
+.oc-menu-item:hover {
+  background: var(--interactive-hover);
+}
+.oc-menu-item-danger,
+.oc-menu-item-danger .remixicon {
+  color: #f87171;
+}
+.oc-menu-item-danger:hover {
+  background: color-mix(in srgb, #f87171 12%, transparent);
+}
+.oc-dialog.rename-dialog {
+  width: min(92vw, 360px);
 }
 .zeno-sidebar-empty-projects {
   display: flex;

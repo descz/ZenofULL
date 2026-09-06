@@ -242,7 +242,7 @@
     memoryEditor: null,
   };
 
-  if (!['chat', 'memory', 'projects', 'marketplace', 'squad'].includes(state.workspace)) state.workspace = 'chat';
+  if (!['chat', 'memory'].includes(state.workspace)) state.workspace = 'chat';
   if (!Array.isArray(state.memoryNotes) || !state.memoryNotes.length) state.memoryNotes = MEMORY_NOTES;
   else {
     const storedMemoryIds = new Set(state.memoryNotes.map((note) => note.id));
@@ -518,18 +518,11 @@
     <div class="app-region-no-drag absolute left-0 top-0 z-30 flex select-none items-center pr-2" style="height: var(--oc-header-height, 3rem); padding-left: var(--oc-titlebar-left-inset, 0.75rem);">
       <div class="flex items-center gap-2">
         <button type="button" aria-label="Open sessions" data-action="toggle-sidebar" class="app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary hover:bg-interactive-hover transition-colors shrink-0">${icon('oc-layout-left')}</button>
-        <div class="app-region-no-drag inline-flex shrink-0 items-center self-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[var(--surface-elevated)] overflow-hidden border border-border/60 h-7 oc-vibrancy-pill">
-          <button type="button" class="inline-flex h-full items-center justify-center typography-ui-label font-medium text-foreground hover:bg-interactive-hover px-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed" aria-label="Zeno Agent"><img src="Z.png" alt="Zeno Agent" class="h-4 w-4 rounded-[3px] object-contain"></button>
-          <button type="button" class="inline-flex h-full w-7 items-center justify-center border-l border-[var(--interactive-border)] text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">${icon('oc-arrow-down-s', 'remixicon h-4 w-4')}</button>
-        </div>
       </div>
     </div>`;
 
   const SIDEBAR_DESTINATIONS = [
     ['memory', 'Memory', 'oc-brain-ai-3', 'Agent knowledge graph'],
-    ['marketplace', 'Marketplace', 'oc-puzzle-2', 'Skills and plugins'],
-    ['squad', 'Squad', 'oc-ai-agent', 'Agent teams'],
-    ['projects', 'Projects', 'oc-folder', 'Organize workspaces'],
   ];
 
   const tplSidebarDestination = ([key, label, iconName, description]) => `
@@ -546,12 +539,11 @@
         <span class="truncate">New chat</span>
         <kbd>Ctrl N</kbd>
       </button>
-      <div class="zeno-sidebar-label">Workspace</div>
       <nav class="zeno-sidebar-nav" aria-label="Workspace navigation">
         ${SIDEBAR_DESTINATIONS.map(tplSidebarDestination).join('')}
       </nav>
       <div class="zeno-project-tools">
-        <span>Project tools</span>
+        <span>My Projects</span>
         <div class="flex items-center gap-0.5">
           <button type="button" data-action="archive-popup" class="zeno-sidebar-tool" aria-label="Archived sessions" title="Archived sessions">${icon('oc-archive', 'remixicon h-3.5 w-3.5')}</button>
           <button type="button" data-action="search-sessions" class="zeno-sidebar-tool" aria-label="Search sessions" title="Search sessions">${icon('oc-search', 'remixicon h-3.5 w-3.5')}</button>
@@ -608,7 +600,7 @@
               <div class="relative flex flex-col w-full overflow-hidden flex-1 min-h-0">
                 <div class="overlay-scrollbar-target overlay-scrollbar-container flex-1 min-h-0 w-full overflow-auto oc-sidebar-scroller space-y-1.5 pb-1 pl-2.5 pr-2 [overflow-anchor:none]" data-orientation="vertical" data-scroll-shadow="true" style="--scroll-shadow-size: 96px;">
                   <div class="space-y-2 pb-2">
-                    ${state.projects.length ? `<div class="zeno-sidebar-section"><div class="zeno-sidebar-section-title">Your projects</div><div class="space-y-1">${state.projects.map(tplProjectSidebarRow).join('')}</div></div>` : `<div class="zeno-sidebar-empty-projects"><span class="zeno-sidebar-empty-icon">${icon('oc-folder', 'remixicon h-4 w-4')}</span><span><strong>No projects yet</strong><small>Create one to group chats and folders.</small><button type="button" data-action="add-project" class="zeno-empty-project-cta">Create project ${icon('oc-arrow-right', 'remixicon h-3 w-3')}</button></span></div>`}
+                    ${state.projects.length ? `<div class="zeno-sidebar-section"><div class="space-y-1">${state.projects.map(tplProjectSidebarRow).join('')}</div></div>` : `<div class="zeno-sidebar-empty-projects"><span class="zeno-sidebar-empty-icon">${icon('oc-folder', 'remixicon h-4 w-4')}</span><span><strong>No projects yet</strong><small>Create one to group chats and folders.</small><button type="button" data-action="add-project" class="zeno-empty-project-cta">Create project ${icon('oc-arrow-right', 'remixicon h-3 w-3')}</button></span></div>`}
                     <div class="relative space-y-1">
                       <div class="-ml-2.5 -mr-2 sticky top-0 z-20 bg-sidebar" data-sidebar-sticky-header="true">
                         <button type="button" class="group flex w-full items-center gap-1.5 py-1 pl-4 pr-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50" aria-expanded="true">
@@ -626,7 +618,6 @@
               </div>
             </div>
             <div class="zeno-sidebar-footer">
-              <button type="button" data-action="about" class="zeno-sidebar-footer-button" aria-label="About Zeno Agent" title="About Zeno Agent">${icon('oc-information', 'remixicon h-4 w-4')}<span>About Zeno</span></button>
               <button type="button" data-action="open-settings" class="zeno-sidebar-footer-button" aria-label="Settings" title="Settings">${icon('oc-settings-3', 'remixicon h-4 w-4')}<span>Settings</span></button>
             </div>
           </div>
@@ -905,35 +896,8 @@
     </div>`;
   };
 
-  const tplProjectsWorkspace = () => `
-    <div class="workspace-view projects-view">
-      <header class="workspace-view-header">
-        <div><div class="workspace-eyebrow">Workspace / Projects</div><h1>Projects</h1><p>Junte pastas e chats em um contexto que continua de sessão para sessão.</p></div>
-        <button type="button" data-action="new-project-main" class="workspace-primary-button">${icon('oc-add', 'remixicon h-3.5 w-3.5')}New project</button>
-      </header>
-      ${state.projects.length ? `<div class="project-card-grid">${state.projects.map((project) => {
-        const chats = projectSessions(project.id);
-        return `<section class="project-card"><button type="button" data-project-open="${project.id}" class="project-card-main"><span class="project-card-icon">${icon('oc-folder', 'remixicon h-5 w-5')}</span><span class="project-card-copy"><strong>${esc(project.name)}</strong><small>${project.folders.map(esc).join(' · ')}</small></span><span class="project-card-count">${chats.length} chat${chats.length === 1 ? '' : 's'}</span></button><div class="project-card-footer"><span>${chats.length ? 'Continue a conversation' : 'Start the first conversation'}</span><button type="button" data-project-new-chat="${project.id}" class="project-card-action">${icon('oc-chat-new', 'remixicon h-3.5 w-3.5')}New chat</button></div></section>`;
-      }).join('')}</div>` : `<div class="workspace-empty-state"><div class="workspace-empty-icon">${icon('oc-folder-add', 'remixicon h-7 w-7')}</div><h2>Your projects live here</h2><p>Create a project to attach multiple folders and keep its chats together.</p><button type="button" data-action="new-project-main" class="workspace-primary-button">${icon('oc-add', 'remixicon h-3.5 w-3.5')}Create your first project</button></div>`}
-    </div>`;
-
-  const tplMarketplaceWorkspace = () => `
-    <div class="workspace-view marketplace-view">
-      <header class="workspace-view-header"><div><div class="workspace-eyebrow">Zeno / Marketplace</div><h1>Marketplace</h1><p>Descubra novas formas de dar contexto e capacidade ao seu agente.</p></div><span class="workspace-status-pill">Coming soon</span></header>
-      <div class="marketplace-card-grid"><div class="marketplace-card"><span class="marketplace-card-icon">${icon('oc-ai-generate-2', 'remixicon h-5 w-5')}</span><div><strong>Skills</strong><p>Fluxos prontos para tarefas específicas, preparados para entrar no seu workspace.</p></div><span class="marketplace-card-badge">Soon</span></div><div class="marketplace-card"><span class="marketplace-card-icon">${icon('oc-puzzle-2', 'remixicon h-5 w-5')}</span><div><strong>Plugins</strong><p>Conecte ferramentas externas e amplie o que o Zeno consegue fazer.</p></div><span class="marketplace-card-badge">Soon</span></div></div>
-    </div>`;
-
-  const tplSquadWorkspace = () => `
-    <div class="workspace-view squad-view">
-      <header class="workspace-view-header"><div><div class="workspace-eyebrow">Zeno / Squad</div><h1>Squad</h1><p>Monte uma equipe de agentes com papéis diferentes para pensar, construir e revisar.</p></div><span class="workspace-status-pill">Coming soon</span></header>
-      <div class="workspace-empty-state squad-empty-state"><div class="workspace-empty-icon squad-empty-icon">${icon('oc-ai-agent', 'remixicon h-7 w-7')}</div><h2>Agent squads are next</h2><p>Esta superfície já está no workspace. A criação e coordenação de squads chega na próxima etapa.</p></div>
-    </div>`;
-
   const tplWorkspace = () => {
     if (state.workspace === 'memory') return tplMemoryWorkspace();
-    if (state.workspace === 'projects') return tplProjectsWorkspace();
-    if (state.workspace === 'marketplace') return tplMarketplaceWorkspace();
-    if (state.workspace === 'squad') return tplSquadWorkspace();
     return '';
   };
 
@@ -996,16 +960,12 @@
         </div>
       </div>`;
     }
-    if (state.modal === 'info') {
-      title = 'About Zeno Agent';
-      body = `<div class="space-y-4 text-sm text-foreground/85"><div class="flex items-center gap-3"><img src="Z.png" alt="Zeno Agent" class="h-12 w-12 rounded-xl object-contain"><div><div class="font-medium text-foreground">Zeno Agent</div><div class="text-xs text-muted-foreground">Local browser workspace</div></div></div><p>Zeno Agent is a lightweight client-side workspace for organizing coding sessions, projects and agent context.</p><p class="text-muted-foreground">This standalone build runs directly in the browser. Your local sessions and project choices stay in this browser.</p><div class="rounded-md border border-border/70 bg-[var(--surface-elevated)] p-3 text-xs text-muted-foreground">Version 1.0 · Static browser edition</div></div>`;
-    }
     if (state.modal === 'search') {
       title = 'Search sessions';
       body = `<div class="space-y-3"><input autofocus data-session-search class="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none focus:border-primary" placeholder="Search sessions"><div data-search-results class="max-h-64 overflow-y-auto space-y-1">${state.sessions.map((s) => `<button type="button" data-search-session data-session-id="${s.id}" class="flex w-full rounded-md px-2.5 py-2 text-left text-sm text-foreground hover:bg-interactive-hover">${esc(s.title)}</button>`).join('')}</div></div>`;
     }
-    const widths = { project: 410, archive: 360, info: 340, search: 360 };
-    const heights = { project: 430, archive: 330, info: 290, search: 350 };
+    const widths = { project: 410, archive: 360, search: 360 };
+    const heights = { project: 430, archive: 330, search: 350 };
     const width = widths[state.modal] || 360;
     const height = heights[state.modal] || 350;
     const anchor = state.modalAnchor || { x: 12, y: 64, w: 24, h: 24, above: false };
@@ -1569,11 +1529,6 @@
       persistWorkspace();
       render();
     }));
-    $('[data-action="new-project-main"]', rootEl)?.addEventListener('click', () => {
-      state.modal = 'project';
-      state.modalAnchor = null;
-      render();
-    });
   };
 
   const bindChat = (rootEl) => {
@@ -1628,8 +1583,7 @@
       state.workspace = button.dataset.workspace;
       state.noteId = null;
       state.panel = null;
-      if (state.workspace === 'projects') state.activeProjectId = null;
-      if (state.workspace !== 'chat' && state.workspace !== 'projects') state.activeProjectId = null;
+      if (state.workspace !== 'chat') state.activeProjectId = null;
       persistWorkspace();
       render();
     }));
@@ -1667,7 +1621,6 @@
     $$('[data-action="add-project"]', rootEl).forEach((button) => button.addEventListener('click', (event) => openSidebarPopup(event.currentTarget, 'project')));
     $('[data-action="archive-popup"]', rootEl)?.addEventListener('click', (event) => openSidebarPopup(event.currentTarget, 'archive'));
     $('[data-action="search-sessions"]', rootEl)?.addEventListener('click', (event) => openSidebarPopup(event.currentTarget, 'search'));
-    $('[data-action="about"]', rootEl)?.addEventListener('click', (event) => openSidebarPopup(event.currentTarget, 'info', true));
     const handle = $('[data-action="resize-sidebar"]', rootEl);
     if (handle) {
       handle.addEventListener('mousedown', (e) => {
@@ -1720,7 +1673,7 @@
       state.projects.push(project);
       LS.set('oc-clone-projects', state.projects);
       state.activeProjectId = project.id;
-      state.workspace = 'projects';
+      state.workspace = 'chat';
       state.modal = null;
       state.modalAnchor = null;
       persistWorkspace();

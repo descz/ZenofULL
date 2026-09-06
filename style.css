@@ -1,4 +1,4 @@
-﻿/* OpenChamber clone â€” theme vars (flexoki, extracted from the real build) + extras */
+/* OpenChamber clone â€” theme vars (flexoki, extracted from the real build) + extras */
 
 /* ============ THEME LIGHT (exact vars from the real app) ============ */
 :root,
@@ -471,15 +471,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   font: 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   opacity: .75;
 }
-.zeno-sidebar-label,
-.zeno-sidebar-section-title {
-  padding: 18px 8px 6px;
-  color: var(--muted-foreground);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-}
 .zeno-sidebar-nav {
   display: grid;
   gap: 2px;
@@ -558,9 +549,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
 .zeno-sidebar-section {
   margin: 0 0 5px;
 }
-.zeno-sidebar-section-title {
-  padding-top: 5px;
-}
 .zeno-project-group {
   padding: 3px 3px 5px;
   border: 1px solid transparent;
@@ -594,7 +582,7 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   background: var(--interactive-hover);
 }
 .zeno-project-open .zeno-sidebar-nav-icon {
-  color: #b48cff;
+  color: #ffffff;
 }
 .zeno-project-count {
   color: var(--muted-foreground);
@@ -690,25 +678,8 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   background: var(--interactive-hover);
 }
 
-/* ============ WORKSPACE LANDING VIEWS ============ */
-.workspace-view {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: auto;
-  padding: clamp(26px, 5vw, 72px) clamp(20px, 6vw, 84px);
-  background: var(--background);
-  color: var(--foreground);
-}
-.workspace-view-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 28px;
-  width: min(100%, 980px);
-  margin: 0 auto 34px;
-}
+/* ============ WORKSPACE LANDING VIEWS (removed pages) ============ */
+/* Only the shared pieces still used by the Create-project dialog are kept. */
 .workspace-eyebrow {
   margin-bottom: 10px;
   color: var(--muted-foreground);
@@ -716,20 +687,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   letter-spacing: .12em;
   text-transform: uppercase;
 }
-.workspace-view h1 {
-  margin: 0;
-  font-size: clamp(28px, 4vw, 44px);
-  font-weight: 530;
-  letter-spacing: -.045em;
-}
-.workspace-view-header p {
-  max-width: 520px;
-  margin: 10px 0 0;
-  color: var(--muted-foreground);
-  font-size: 14px;
-  line-height: 1.55;
-}
-.workspace-primary-button,
 .project-primary-button {
   display: inline-flex;
   align-items: center;
@@ -744,179 +701,8 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   font-size: 12px;
   font-weight: 650;
 }
-.workspace-primary-button:hover,
 .project-primary-button:hover {
   opacity: .86;
-}
-.project-card-grid,
-.marketplace-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
-  gap: 12px;
-  width: min(100%, 980px);
-  margin: 0 auto;
-}
-.project-card,
-.marketplace-card {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface-elevated) 88%, transparent);
-  box-shadow: 0 14px 40px rgb(0 0 0 / .12);
-}
-.project-card {
-  overflow: hidden;
-}
-.project-card-main {
-  display: flex;
-  align-items: flex-start;
-  width: 100%;
-  min-height: 112px;
-  gap: 12px;
-  padding: 18px;
-  text-align: left;
-}
-.project-card-main:hover {
-  background: var(--interactive-hover);
-}
-.project-card-icon,
-.marketplace-card-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  color: #b48cff;
-  background: color-mix(in srgb, #b48cff 14%, transparent);
-}
-.project-card-copy {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 6px;
-}
-.project-card-copy strong,
-.marketplace-card strong {
-  color: var(--foreground);
-  font-size: 14px;
-  font-weight: 620;
-}
-.project-card-copy small {
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 11px;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.project-card-count {
-  color: var(--muted-foreground);
-  font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: nowrap;
-}
-.project-card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 14px 10px 18px;
-  border-top: 1px solid var(--border);
-  color: var(--muted-foreground);
-  font-size: 11px;
-}
-.project-card-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 7px;
-  border-radius: 6px;
-  color: var(--foreground);
-  font-size: 11px;
-}
-.project-card-action:hover {
-  background: var(--interactive-hover);
-}
-.workspace-empty-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  flex-direction: column;
-  width: min(100%, 500px);
-  min-height: 300px;
-  margin: 0 auto;
-  text-align: center;
-}
-.workspace-empty-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 62px;
-  height: 62px;
-  margin-bottom: 18px;
-  border: 1px solid color-mix(in srgb, #b48cff 32%, var(--border));
-  border-radius: 18px;
-  color: #b48cff;
-  background: color-mix(in srgb, #b48cff 10%, transparent);
-}
-.workspace-empty-state h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 580;
-}
-.workspace-empty-state p {
-  max-width: 390px;
-  margin: 8px 0 18px;
-  color: var(--muted-foreground);
-  font-size: 13px;
-  line-height: 1.55;
-}
-.workspace-status-pill {
-  flex-shrink: 0;
-  padding: 6px 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--muted-foreground);
-  font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-}
-.marketplace-card-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.marketplace-card {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  min-height: 158px;
-  padding: 20px;
-}
-.marketplace-card-icon {
-  color: #65d7c1;
-  background: color-mix(in srgb, #65d7c1 13%, transparent);
-}
-.marketplace-card p {
-  max-width: 320px;
-  margin: 8px 0 0;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 1.55;
-}
-.marketplace-card-badge {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  color: var(--muted-foreground);
-  font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  text-transform: uppercase;
-}
-.squad-empty-icon {
-  color: #58b6ff;
-  border-color: color-mix(in srgb, #58b6ff 32%, var(--border));
-  background: color-mix(in srgb, #58b6ff 10%, transparent);
 }
 
 /* ============ MEMORY CONSTELLATION ============ */
@@ -1702,22 +1488,8 @@ body:has(.memory-view) [data-panel-root] {
     justify-content: center;
     padding: 0;
   }
-  .workspace-view {
-    padding: 26px 18px;
-  }
-  .workspace-view-header,
   .memory-header {
     flex-direction: column;
-  }
-  .workspace-view-header {
-    margin-bottom: 24px;
-  }
-  .workspace-primary-button,
-  .workspace-status-pill {
-    align-self: flex-start;
-  }
-  .marketplace-card-grid {
-    grid-template-columns: 1fr;
   }
   .memory-header {
     gap: 14px;

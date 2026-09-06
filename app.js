@@ -240,6 +240,8 @@
     memoryEdges: LS.get('oc-clone-memory-edges', MEMORY_EDGES),
     noteId: null,
     memoryEditor: null,
+    chatsCollapsed: LS.get('oc-clone-chats-collapsed', false) === true,
+    editProjectId: null,
   };
 
   if (!['chat', 'memory'].includes(state.workspace)) state.workspace = 'chat';
@@ -291,20 +293,6 @@
     LS.set('oc-clone-sessions', state.sessions);
     return session;
   };
-  const openProject = (projectId) => {
-    const project = state.projects.find((item) => item.id === projectId);
-    if (!project) return;
-    state.activeProjectId = project.id;
-    state.workspace = 'chat';
-    const session = projectSessions(project.id)[0] || createSession(project.id);
-    state.activeId = session.id;
-    state.noteId = null;
-    state.panel = null;
-    persistWorkspace();
-    render();
-  };
-
-
   const BROWSER_HOME = 'about:blank';
   const resolveBrowserUrl = (value) => {
     const raw = String(value || '').trim();
@@ -434,8 +422,8 @@
           <div class="flex items-center justify-between border-b border-border/70 px-3 py-1.5">
             <span class="font-mono text-[13px] text-muted-foreground">${esc(lang || 'text')}</span>
             <div class="flex items-center gap-1" data-md-code-actions="">
-              <button type="button" class="p-1 rounded hover:bg-interactive-hover/60 hover:text-foreground transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--interactive-focus-ring)] text-foreground opacity-100" data-md-action="toggle-code-wrap" title="Disable line wrap" aria-label="Disable line wrap" aria-pressed="true">${icon('oc-text-wrap', 'remixicon size-3.5')}</button>
-              <button type="button" class="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--interactive-focus-ring)]" data-md-action="copy-code" title="Copy code" aria-label="Copy code">${icon('oc-file-copy', 'remixicon size-3.5')}</button>
+              <button type="button" class="p-1 rounded hover:text-foreground transition-colors text-foreground opacity-100" data-md-action="toggle-code-wrap" title="Disable line wrap" aria-label="Disable line wrap" aria-pressed="true">${icon('oc-text-wrap', 'remixicon size-3.5')}</button>
+              <button type="button" class="p-1 rounded text-muted-foreground hover:text-foreground transition-colors" data-md-action="copy-code" title="Copy code" aria-label="Copy code">${icon('oc-file-copy', 'remixicon size-3.5')}</button>
             </div>
           </div>
           <div data-md-code-body="" class="px-3 py-2.5 overflow-x-hidden">
@@ -517,7 +505,7 @@
   const tplTopbar = () => `
     <div class="app-region-no-drag absolute left-0 top-0 z-30 flex select-none items-center pr-2" style="height: var(--oc-header-height, 3rem); padding-left: var(--oc-titlebar-left-inset, 0.75rem);">
       <div class="flex items-center gap-2">
-        <button type="button" aria-label="Open sessions" data-action="toggle-sidebar" class="app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary hover:bg-interactive-hover transition-colors shrink-0">${icon('oc-layout-left')}</button>
+        <button type="button" aria-label="Open sessions" data-action="toggle-sidebar" data-topbar-toggle class="app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground transition-colors shrink-0">${icon('oc-layout-left')}</button>
       </div>
     </div>`;
 
@@ -558,14 +546,14 @@
       <div role="button" tabindex="0" data-session-id="${s.id}">
         <div data-session-row="${s.id}" class="group relative my-0.5 flex cursor-pointer items-center rounded-md py-1 pr-1.5 ${active ? 'bg-primary/10' : ''}" style="padding-left: ${indent}px;">
           <div class="flex min-w-0 flex-1 items-center">
-            <button type="button" data-action="open-session" class="flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none transition-[padding] group-hover:pr-7 group-focus-within:pr-7">
+            <button type="button" data-action="open-session" class="flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden text-left focus-visible:outline-none text-foreground select-none transition-[padding] group-hover:pr-7 group-focus-within:pr-7">
               <div class="flex w-full items-center min-w-0 flex-1 gap-1 overflow-hidden">
                 <div class="block min-w-0 flex-1 truncate typography-ui-label font-normal ${active ? 'text-primary' : 'text-foreground/80'}">${esc(s.title)}</div>
               </div>
             </button>
           </div>
           <div class="absolute right-0 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5 transition-opacity opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto">
-            <button type="button" data-action="archive-session" class="inline-flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity text-muted-foreground hover:text-foreground h-4 w-4" aria-label="Archive session" title="Archive session">${icon('oc-archive', 'remixicon h-3.5 w-3.5')}</button>
+            <button type="button" data-action="archive-session" class="inline-flex items-center justify-center rounded-md focus-visible:outline-none transition-opacity text-muted-foreground hover:text-foreground h-4 w-4" aria-label="Archive session" title="Archive session">${icon('oc-archive', 'remixicon h-3.5 w-3.5')}</button>
           </div>
         </div>
       </div>`;
@@ -576,14 +564,13 @@
     const active = state.activeProjectId === project.id;
     return `<div class="zeno-project-group ${active ? 'is-active' : ''}">
       <div class="zeno-project-row">
-        <button type="button" data-project-open="${project.id}" class="zeno-project-open" aria-label="Open project ${esc(project.name)}">
+        <button type="button" data-project-open="${project.id}" class="zeno-project-open" aria-label="Edit project ${esc(project.name)}" title="Edit project">
           <span class="zeno-sidebar-nav-icon">${icon('oc-folder', 'remixicon h-4 w-4')}</span>
           <span class="min-w-0 flex-1 truncate">${esc(project.name)}</span>
           <span class="zeno-project-count">${chats.length}</span>
         </button>
         <button type="button" data-project-new-chat="${project.id}" class="zeno-sidebar-tool zeno-project-add" aria-label="New chat in ${esc(project.name)}" title="New chat in project">${icon('oc-add', 'remixicon h-3.5 w-3.5')}</button>
       </div>
-      <div class="zeno-project-folders" title="${esc(project.folders.join(' · '))}">${project.folders.map(esc).join(' · ')}</div>
       ${chats.length ? `<div class="zeno-project-chats">${chats.map((chat) => tplSessionRow(chat, 34)).join('')}</div>` : '<div class="zeno-project-empty">No chats yet</div>'}
     </div>`;
   };
@@ -591,7 +578,7 @@
   const tplSidebar = () => `
     <aside class="relative flex h-full overflow-hidden border-r will-change-[width] motion-reduce:transition-none bg-sidebar oc-vibrancy-surface shadow-[inset_-2px_0_10px_-2px_rgb(0_0_0_/_0.06)] border-border" aria-hidden="${!state.sidebarOpen}" style="width: ${state.sidebarOpen ? state.sidebarW : 0}px; min-width: ${state.sidebarOpen ? state.sidebarW : 0}px; max-width: ${state.sidebarOpen ? state.sidebarW : 0}px; --oc-left-sidebar-width: ${state.sidebarOpen ? state.sidebarW : 0}px; overflow-x: clip; transition-property: width, min-width, max-width; transition-duration: 200ms; transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);">
       <div class="absolute right-0 top-0 z-20 h-full w-[3px] cursor-col-resize hover:bg-[var(--interactive-border)]/80 transition-colors" role="separator" aria-orientation="vertical" aria-label="Resize left panel" data-action="resize-sidebar"></div>
-      <div class="relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none" aria-hidden="false" style="width: ${state.sidebarOpen ? state.sidebarW : 0}px; overflow-x: hidden;">
+      <div data-sidebar-content class="relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none" aria-hidden="false" style="width: ${state.sidebarOpen ? state.sidebarW : 0}px; overflow-x: hidden;">
         <div aria-hidden="true" class="flex shrink-0" style="height: var(--oc-header-height, 3rem);"></div>
         <div class="min-h-0 flex-1 overflow-y-auto">
           <div class="relative flex h-full flex-col text-foreground overflow-x-hidden bg-transparent">
@@ -603,12 +590,12 @@
                     ${state.projects.length ? `<div class="zeno-sidebar-section"><div class="space-y-1">${state.projects.map(tplProjectSidebarRow).join('')}</div></div>` : `<div class="zeno-sidebar-empty-projects"><span class="zeno-sidebar-empty-icon">${icon('oc-folder', 'remixicon h-4 w-4')}</span><span><strong>No projects yet</strong><small>Create one to group chats and folders.</small><button type="button" data-action="add-project" class="zeno-empty-project-cta">Create project ${icon('oc-arrow-right', 'remixicon h-3 w-3')}</button></span></div>`}
                     <div class="relative space-y-1">
                       <div class="-ml-2.5 -mr-2 sticky top-0 z-20 bg-sidebar" data-sidebar-sticky-header="true">
-                        <button type="button" class="group flex w-full items-center gap-1.5 py-1 pl-4 pr-3.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50" aria-expanded="true">
-                          <span class="inline-flex h-3.5 w-3.5 items-center justify-center">${icon('oc-arrow-down-s', 'remixicon h-3.5 w-3.5')}</span>
-                          <span class="text-[14px] font-semibold lowercase text-foreground">Recent chats</span>
+                        <button type="button" data-chats-toggle class="group flex w-full items-center gap-1.5 py-1 pl-4 pr-3.5 text-left focus-visible:outline-none" aria-expanded="${!state.chatsCollapsed}">
+                          <span class="inline-flex h-3.5 w-3.5 items-center justify-center transition-transform duration-150 ${state.chatsCollapsed ? '-rotate-90' : ''}">${icon('oc-arrow-down-s', 'remixicon h-3.5 w-3.5')}</span>
+                          <span class="text-[14px] font-semibold text-foreground">Chats</span>
                         </button>
                       </div>
-                      <div class="space-y-0.5">
+                      <div class="space-y-0.5" data-chats-list${state.chatsCollapsed ? ' hidden' : ''}>
                         ${state.sessions.map(tplSessionRow).join('')}
                         <button type="button" class="mt-0.5 flex items-center justify-start rounded-md pl-[26px] pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline">Show more sessions</button>
                       </div>
@@ -695,7 +682,7 @@
               <div class="flex flex-wrap items-center justify-center gap-1.5 chat-input-column mt-6" data-quick-actions-list>
                 ${getQuickActions().map(([i, t], index) => `
                 <div class="group/chip relative" draggable="true" data-quick-action data-quick-index="${index}" title="Arraste para mover · botão direito para editar">
-                  <button type="button" role="button" tabindex="0" class="group inline-flex touch-none select-none items-center gap-1 rounded-full border px-2 py-1 text-[10px] leading-4 text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground" data-chip="${esc(t)}">${icon(i, 'remixicon h-3 w-3')}<span class="whitespace-nowrap">${esc(t)}</span></button>
+                  <button type="button" role="button" tabindex="0" class="group inline-flex touch-none select-none items-center gap-1 rounded-full border px-2 py-1 text-[10px] leading-4 text-muted-foreground transition-colors hover:text-foreground" data-chip="${esc(t)}">${icon(i, 'remixicon h-3 w-3')}<span class="whitespace-nowrap">${esc(t)}</span></button>
                 </div>`).join('')}
               </div>
             </div>
@@ -708,8 +695,8 @@
           ${suggestion ? `
           <div class="flex w-full min-w-0 justify-center mb-1.5">
             <div class="relative w-full min-w-0 max-w-full">
-              <button type="button" aria-label="Use suggested message" data-action="use-suggestion" class="group flex w-full min-w-0 select-none items-center gap-1.5 rounded-full border py-1.5 pl-3 pr-8 text-sm text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground" style="background-color: var(--surface-elevated); border-color: var(--interactive-border);">${icon('oc-search-eye', 'remixicon h-4 w-4')}<span class="truncate">${esc(suggestion)}</span></button>
-              <button type="button" aria-label="Dismiss suggestion" title="Dismiss suggestion" data-action="dismiss-suggestion" class="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground/60 transition-colors hover:bg-[var(--interactive-hover)] hover:text-foreground">${icon('oc-close', 'remixicon h-3 w-3')}</button>
+              <button type="button" aria-label="Use suggested message" data-action="use-suggestion" class="group flex w-full min-w-0 select-none items-center gap-1.5 rounded-full border py-1.5 pl-3 pr-8 text-sm text-muted-foreground transition-colors hover:text-foreground" style="background-color: var(--surface-elevated); border-color: var(--interactive-border);">${icon('oc-search-eye', 'remixicon h-4 w-4')}<span class="truncate">${esc(suggestion)}</span></button>
+              <button type="button" aria-label="Dismiss suggestion" title="Dismiss suggestion" data-action="dismiss-suggestion" class="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground/60 transition-colors hover:text-foreground">${icon('oc-close', 'remixicon h-3 w-3')}</button>
             </div>
           </div>` : ''}
           <div class="contents">${chatInput()}</div>
@@ -741,7 +728,7 @@
               <div class="flex items-center justify-end gap-1 translate-x-0 pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-hover/user-shell:pointer-events-auto group-hover/user-shell:opacity-100">
                 <span class="mr-1 flex items-center gap-1 text-sm tabular-nums text-muted-foreground/60" aria-label="Message time: ${m.time || fmtTime(now())}">${icon('oc-time', 'remixicon h-3.5 w-3.5')}<span class="message-footer__label">${m.time || fmtTime(now())}</span></span>
                 ${[['oc-arrow-go-back', 'Revert to this message'], ['oc-git-branch', 'Fork from this message'], ['oc-pushpin-2', 'Pin into context (survives compaction)'], ['oc-file-copy', 'Copy message text']].map(([i, l]) => `
-                <button data-slot="tooltip-trigger" class="group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none focus-visible:border-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 hover:bg-interactive-hover size-9 h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50" type="button" aria-label="${l}">${icon(i, 'remixicon h-3 w-3')}</button>`).join('')}
+                <button data-slot="tooltip-trigger" class="group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 size-9 h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground" type="button" aria-label="${l}">${icon(i, 'remixicon h-3 w-3')}</button>`).join('')}
               </div>
             </div>
           </div>
@@ -760,8 +747,8 @@
         <div class="flex items-center justify-between border-b border-border/70 px-3 py-1.5">
           <span class="font-mono text-[13px] text-muted-foreground">${esc(m.code.lang)}</span>
           <div class="flex items-center gap-1" data-md-code-actions="">
-            <button type="button" class="p-1 rounded hover:bg-interactive-hover/60 hover:text-foreground transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--interactive-focus-ring)] text-foreground opacity-100" data-md-action="toggle-code-wrap" title="Disable line wrap" aria-label="Disable line wrap" aria-pressed="true">${icon('oc-text-wrap', 'remixicon size-3.5')}</button>
-            <button type="button" class="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--interactive-focus-ring)]" data-md-action="copy-code" title="Copy code" aria-label="Copy code">${icon('oc-file-copy', 'remixicon size-3.5')}</button>
+            <button type="button" class="p-1 rounded hover:text-foreground transition-colors text-foreground opacity-100" data-md-action="toggle-code-wrap" title="Disable line wrap" aria-label="Disable line wrap" aria-pressed="true">${icon('oc-text-wrap', 'remixicon size-3.5')}</button>
+            <button type="button" class="p-1 rounded text-muted-foreground hover:text-foreground transition-colors" data-md-action="copy-code" title="Copy code" aria-label="Copy code">${icon('oc-file-copy', 'remixicon size-3.5')}</button>
           </div>
         </div>
         <div data-md-code-body="" class="px-3 py-2.5 overflow-x-hidden">
@@ -798,7 +785,7 @@
               </div>
               <div class="flex items-center gap-1.5 pointer-events-none opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100" data-message-action-group="true">
                 ${[['oc-file-copy', 'Copy message text'], ['oc-image-download', 'Download as image'], ['oc-booklet', 'Export markdown'], ['oc-pushpin-2', 'Pin into context'], ['oc-chat-new', 'Continue in new session']].map(([i, l]) => `
-                <button data-slot="tooltip-trigger" class="group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none focus-visible:border-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 hover:bg-interactive-hover size-9 h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50" type="button" aria-label="${l}">${icon(i, 'remixicon h-3.5 w-3.5')}</button>`).join('')}
+                <button data-slot="tooltip-trigger" class="group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 size-9 h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground" type="button" aria-label="${l}">${icon(i, 'remixicon h-3.5 w-3.5')}</button>`).join('')}
               </div>
             </div>
           </div>
@@ -940,29 +927,31 @@
     if (state.modal === 'archive') {
       title = 'Archived sessions';
       body = state.archivedSessions.length
-        ? `<div class="max-h-72 overflow-y-auto space-y-1">${state.archivedSessions.map((s) => `<div class="flex items-center gap-2 rounded-md px-2.5 py-2 hover:bg-interactive-hover"><span class="min-w-0 flex-1 truncate text-sm text-foreground">${esc(s.title)}</span><button type="button" data-action="restore-session" data-session-id="${s.id}" class="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-interactive-hover hover:text-foreground">Restore</button><button type="button" data-action="delete-archived" data-session-id="${s.id}" class="rounded-md p-1 text-muted-foreground hover:text-destructive" aria-label="Delete archived session">${icon('oc-delete-bin', 'remixicon h-3.5 w-3.5')}</button></div>`).join('')}</div>`
+        ? `<div class="max-h-72 overflow-y-auto space-y-1">${state.archivedSessions.map((s) => `<div class="flex items-center gap-2 rounded-md px-2.5 py-2"><span class="min-w-0 flex-1 truncate text-sm text-foreground">${esc(s.title)}</span><button type="button" data-action="restore-session" data-session-id="${s.id}" class="rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground">Restore</button><button type="button" data-action="delete-archived" data-session-id="${s.id}" class="rounded-md p-1 text-muted-foreground hover:text-destructive" aria-label="Delete archived session">${icon('oc-delete-bin', 'remixicon h-3.5 w-3.5')}</button></div>`).join('')}</div>`
         : '<div class="py-8 text-center text-sm text-muted-foreground">No archived sessions.</div>';
     }
-    if (state.modal === 'project') {
+    if (state.modal === 'project' || state.modal === 'project-edit') {
+      const editing = state.modal === 'project-edit' ? state.projects.find((item) => item.id === state.editProjectId) : null;
+      const currentFolders = editing ? editing.folders : [];
       return `<div class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-3 backdrop-blur-[3px] oc-backdrop" data-action-modal>
-        <div role="dialog" aria-modal="true" aria-label="Create project" class="oc-dialog project-dialog">
-          <header class="project-dialog-header"><div><div class="workspace-eyebrow">Workspace / Projects</div><h2>Create a project</h2><p>Defina um contexto durável para seus chats e pastas.</p></div><button type="button" data-action="close-modal" aria-label="Close dialog" class="memory-icon-button">${icon('oc-close', 'remixicon h-4 w-4')}</button></header>
+        <div role="dialog" aria-modal="true" aria-label="${editing ? 'Edit project' : 'Create project'}" class="oc-dialog project-dialog">
+          <header class="project-dialog-header"><div><div class="workspace-eyebrow">Workspace / Projects</div><h2>${editing ? 'Edit project' : 'Create a project'}</h2><p>Defina um contexto durável para seus chats e pastas.</p></div><button type="button" data-action="close-modal" aria-label="Close dialog" class="memory-icon-button">${icon('oc-close', 'remixicon h-4 w-4')}</button></header>
           <form data-project-form class="project-dialog-form">
             <div class="project-form-main">
-              <label class="project-field"><span>Project title</span><input required data-project-name class="project-title-input" placeholder="Ex.: Website da oficina" autocomplete="off"></label>
-              <div class="project-folder-heading"><div><span>Attach folders</span><small>Escolha uma ou mais pastas para dar ao projeto seu contexto.</small></div><span class="project-folder-count" data-project-folder-count>0 selected</span></div>
-              <div class="project-folder-grid">${PROJECT_FOLDERS.map((folder) => `<label class="project-folder-option"><input type="checkbox" value="${folder}" data-project-folder><span class="project-folder-check">${icon('oc-check', 'remixicon h-3 w-3')}</span><span class="project-folder-icon">${icon('oc-folder', 'remixicon h-4 w-4')}</span><span>${folder}</span></label>`).join('')}</div>
+              <label class="project-field"><span>Project title</span><input required data-project-name class="project-title-input" value="${editing ? esc(editing.name) : ''}" placeholder="Ex.: Website da oficina" autocomplete="off"></label>
+              <div class="project-folder-heading"><div><span>Attach folders</span><small>Escolha uma ou mais pastas para dar ao projeto seu contexto.</small></div><span class="project-folder-count" data-project-folder-count>${currentFolders.length} selected</span></div>
+              <div class="project-folder-grid">${PROJECT_FOLDERS.map((folder) => `<label class="project-folder-option"><input type="checkbox" value="${folder}" data-project-folder${currentFolders.includes(folder) ? ' checked' : ''}><span class="project-folder-check">${icon('oc-check', 'remixicon h-3 w-3')}</span><span class="project-folder-icon">${icon('oc-folder', 'remixicon h-4 w-4')}</span><span>${folder}</span></label>`).join('')}</div>
               <p class="project-form-error" data-project-error role="alert"></p>
             </div>
             <aside class="project-dialog-aside"><div class="project-aside-icon">${icon('oc-folder-add', 'remixicon h-6 w-6')}</div><strong>One context, many chats</strong><p>Os chats criados dentro deste projeto vão compartilhar as pastas selecionadas sem misturar o restante do seu workspace.</p><div class="project-aside-rule"></div><span>${icon('oc-information', 'remixicon h-3.5 w-3.5')} Stored locally in this browser</span></aside>
-            <footer class="project-dialog-footer"><button type="button" data-action="close-modal" class="project-secondary-button">Cancel</button><button type="submit" class="project-primary-button">Create project ${icon('oc-arrow-right', 'remixicon h-3.5 w-3.5')}</button></footer>
+            <footer class="project-dialog-footer"><button type="button" data-action="close-modal" class="project-secondary-button">Cancel</button><button type="submit" class="project-primary-button">${editing ? 'Save changes' : 'Create project'} ${icon('oc-arrow-right', 'remixicon h-3.5 w-3.5')}</button></footer>
           </form>
         </div>
       </div>`;
     }
     if (state.modal === 'search') {
       title = 'Search sessions';
-      body = `<div class="space-y-3"><input autofocus data-session-search class="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none focus:border-primary" placeholder="Search sessions"><div data-search-results class="max-h-64 overflow-y-auto space-y-1">${state.sessions.map((s) => `<button type="button" data-search-session data-session-id="${s.id}" class="flex w-full rounded-md px-2.5 py-2 text-left text-sm text-foreground hover:bg-interactive-hover">${esc(s.title)}</button>`).join('')}</div></div>`;
+      body = `<div class="space-y-3"><input autofocus data-session-search class="h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none focus:border-primary" placeholder="Search sessions"><div data-search-results class="max-h-64 overflow-y-auto space-y-1">${state.sessions.map((s) => `<button type="button" data-search-session data-session-id="${s.id}" class="flex w-full rounded-md px-2.5 py-2 text-left text-sm text-foreground">${esc(s.title)}</button>`).join('')}</div></div>`;
     }
     const widths = { project: 410, archive: 360, search: 360 };
     const heights = { project: 430, archive: 330, search: 350 };
@@ -974,7 +963,7 @@
     if (left + width > window.innerWidth - 8) left = Math.max(8, anchor.x - width - 8);
     if (top + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8);
     if (top < 8) top = 8;
-    return `<div class="fixed inset-0 z-[80]" data-action-modal><div role="dialog" aria-label="${title}" class="oc-dialog oc-action-popover w-[min(92vw,520px)] max-h-[86dvh] overflow-hidden rounded-xl border border-border bg-background shadow-2xl" style="position:fixed;left:${left}px;top:${top}px;width:min(${width}px,calc(100vw - 16px));"><div class="flex items-center justify-between border-b border-border/70 px-4 py-3"><h2 class="text-sm font-medium text-foreground">${title}</h2><button type="button" data-action="close-modal" aria-label="Close dialog" class="rounded-md p-1 text-muted-foreground hover:bg-interactive-hover hover:text-foreground">${icon('oc-close', 'remixicon h-4 w-4')}</button></div><div class="overflow-y-auto p-4">${body}</div></div></div>`;
+    return `<div class="fixed inset-0 z-[80]" data-action-modal><div role="dialog" aria-label="${title}" class="oc-dialog oc-action-popover w-[min(92vw,520px)] max-h-[86dvh] overflow-hidden rounded-xl border border-border bg-background shadow-2xl" style="position:fixed;left:${left}px;top:${top}px;width:min(${width}px,calc(100vw - 16px));"><div class="flex items-center justify-between border-b border-border/70 px-4 py-3"><h2 class="text-sm font-medium text-foreground">${title}</h2><button type="button" data-action="close-modal" aria-label="Close dialog" class="rounded-md p-1 text-muted-foreground hover:text-foreground">${icon('oc-close', 'remixicon h-4 w-4')}</button></div><div class="overflow-y-auto p-4">${body}</div></div></div>`;
   };
 
   /* ---------- templates: right panel ---------- */
@@ -1067,8 +1056,8 @@
         <header class="flex h-10 items-stretch border-b border-border">
           <div class="flex min-w-0 flex-1 items-center gap-1.5 px-3">${icon(ic, 'remixicon h-3.5 w-3.5')}<span class="truncate typography-ui-label text-foreground">${label}</span></div>
           <div class="flex items-center gap-1 px-1.5">
-            <button data-slot="button" class="group relative inline-flex items-center justify-center whitespace-nowrap [corner-shape:squircle] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 text-foreground hover:bg-interactive-hover hover:text-foreground gap-1.5 has-[>svg]:px-2 rounded-[9px] supports-[corner-shape:squircle]:rounded-[50px] h-7 w-7 p-0" type="button" title="Expand panel" aria-label="Expand panel" data-action="expand-panel">${icon('oc-fullscreen', 'remixicon h-3.5 w-3.5')}</button>
-            <button data-slot="button" class="group relative inline-flex items-center justify-center whitespace-nowrap [corner-shape:squircle] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 text-foreground hover:bg-interactive-hover hover:text-foreground gap-1.5 has-[>svg]:px-2 rounded-[9px] supports-[corner-shape:squircle]:rounded-[50px] h-7 w-7 p-0" type="button" title="Close panel" aria-label="Close panel" data-action="close-panel">${icon('oc-close', 'remixicon h-3.5 w-3.5')}</button>
+            <button data-slot="button" class="group relative inline-flex items-center justify-center whitespace-nowrap [corner-shape:squircle] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 text-foreground hover:text-foreground gap-1.5 has-[>svg]:px-2 rounded-[9px] supports-[corner-shape:squircle]:rounded-[50px] h-7 w-7 p-0" type="button" title="Expand panel" aria-label="Expand panel" data-action="expand-panel">${icon('oc-fullscreen', 'remixicon h-3.5 w-3.5')}</button>
+            <button data-slot="button" class="group relative inline-flex items-center justify-center whitespace-nowrap [corner-shape:squircle] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 text-foreground hover:text-foreground gap-1.5 has-[>svg]:px-2 rounded-[9px] supports-[corner-shape:squircle]:rounded-[50px] h-7 w-7 p-0" type="button" title="Close panel" aria-label="Close panel" data-action="close-panel">${icon('oc-close', 'remixicon h-3.5 w-3.5')}</button>
           </div>
         </header>
         <div class="relative min-h-0 flex-1 overflow-hidden">
@@ -1102,14 +1091,14 @@
     <div role="radiogroup" aria-label="${group}" class="space-y-1.5">
       ${options.map((o) => `
       <div class="flex cursor-pointer gap-2 py-0.5 items-center" role="button" tabindex="0" data-radio="${o}">
-        <button type="button" role="radio" aria-checked="${value === o}" aria-label="${o}" class="group/radio relative flex h-[14px] w-[14px] min-h-[14px] min-w-[14px] shrink-0 self-center items-center justify-center rounded-full outline-none transition-[background-color,box-shadow] duration-200 ease-out ${value === o ? 'bg-[color-mix(in_srgb,var(--primary-base)_80%,transparent)] shadow-none' : 'bg-[var(--surface-muted)] shadow-[inset_0_0_0_1px_var(--interactive-border)] hover:bg-[var(--interactive-hover)]'} focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] focus-visible:ring-offset-1 focus-visible:ring-offset-background"><span aria-hidden="true" class="block h-[5px] w-[5px] rounded-full ${value === o ? 'bg-white' : 'bg-white opacity-0'}"></span></button>
+        <button type="button" role="radio" aria-checked="${value === o}" aria-label="${o}" class="group/radio relative flex h-[14px] w-[14px] min-h-[14px] min-w-[14px] shrink-0 self-center items-center justify-center rounded-full outline-none transition-[background-color,box-shadow] duration-200 ease-out ${value === o ? 'bg-[color-mix(in_srgb,var(--primary-base)_80%,transparent)] shadow-none' : 'bg-[var(--surface-muted)] shadow-[inset_0_0_0_1px_var(--interactive-border)]'}"><span aria-hidden="true" class="block h-[5px] w-[5px] rounded-full ${value === o ? 'bg-white' : 'bg-white opacity-0'}"></span></button>
         <div class="flex min-w-0 flex-col"><span class="typography-settings-field-label font-normal text-foreground">${o}</span></div>
       </div>`).join('')}
     </div>`;
 
   const tplSettingsSelect = (label, value, options, dataMenu) => `
     <div class="flex min-w-0 max-w-[24rem] items-center gap-2">
-      <button type="button" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" data-slot="select-trigger" data-size="settings" aria-label="${label}" data-select-menu="${dataMenu}" class="border-input flex items-center justify-between gap-2 rounded-md border bg-transparent typography-ui-label whitespace-nowrap shadow-none outline-none text-left hover:bg-interactive-hover focus-visible:outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] h-8 min-h-8 px-3 w-full min-w-40 max-w-48">
+      <button type="button" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" data-slot="select-trigger" data-size="settings" aria-label="${label}" data-select-menu="${dataMenu}" class="border-input flex items-center justify-between gap-2 rounded-md border bg-transparent typography-ui-label whitespace-nowrap shadow-none outline-none text-left focus-visible:outline-none h-8 min-h-8 px-3 w-full min-w-40 max-w-48">
         <span data-slot="select-value">${esc(value)}</span>
         <span aria-hidden="true">${icon('oc-arrow-down-s', 'remixicon size-4 opacity-50')}</span>
       </button>
@@ -1138,7 +1127,7 @@
                 <div class="mb-1.5 typography-meta font-medium text-muted-foreground">Dark Theme</div>
                 ${tplSettingsSelect('Select dark theme', darkSel.name, themeList('dark'), 'dark-theme')}
               </div>
-              <button type="button" class="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground hover:bg-interactive-hover transition-colors" data-action="reload-themes">${icon('oc-refresh', 'remixicon h-3.5 w-3.5')}Reload themes</button>
+              <button type="button" class="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground transition-colors" data-action="reload-themes">${icon('oc-refresh', 'remixicon h-3.5 w-3.5')}Reload themes</button>
             </div>
             <div class="space-y-4">
               <div>
@@ -1169,7 +1158,7 @@
                 <div class="space-y-3">
                   <div>
                     <div class="mb-1.5 typography-meta text-muted-foreground">Install App Name</div>
-                    <input value="OpenChamber" class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none focus-visible:border-ring">
+                    <input value="OpenChamber" class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">
                   </div>
                   <div>
                     <div class="mb-1.5 typography-meta text-muted-foreground">Install Orientation</div>
@@ -1190,7 +1179,7 @@
         <div class="mt-6 space-y-4">
           <div>
             <div class="mb-1.5 typography-meta font-medium text-muted-foreground">Application name</div>
-            <input value="OpenChamber" class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none focus-visible:border-ring">
+            <input value="OpenChamber" class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">
           </div>
           <div>
             <div class="mb-1.5 typography-meta font-medium text-muted-foreground">Startup</div>
@@ -1214,7 +1203,7 @@
     <div class="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 oc-backdrop" data-settings-backdrop>
       <div role="dialog" aria-label="OpenChamber settings window." data-open="" class="oc-dialog relative pointer-events-auto w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px] rounded-xl border shadow-none overflow-hidden origin-center bg-background transition-all duration-150 ease-out" style="--nested-dialogs: 0; height: min(85vh, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); max-width: min(1200px, calc(100vw - 24px));">
         <div class="absolute right-0.5 z-50 top-0.5">
-          <button type="button" aria-label="Close settings" title="Close Settings (Ctrl+,)" data-action="close-settings" class="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">${icon('oc-close', 'remixicon h-5 w-5')}</button>
+          <button type="button" aria-label="Close settings" title="Close Settings (Ctrl+,)" data-action="close-settings" class="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none">${icon('oc-close', 'remixicon h-5 w-5')}</button>
         </div>
         <div class="relative flex h-full min-h-0 flex-col overflow-hidden bg-background">
           <div class="flex flex-1 min-h-0 overflow-hidden">
@@ -1229,7 +1218,7 @@
                     <div class="space-y-0.5">
                       ${group ? `<div class="px-3 pb-1 typography-micro font-semibold uppercase tracking-wide text-muted-foreground sm:px-2 sm:pb-0.5 pt-4 sm:pt-3">${group}</div>` : ''}
                       ${items.map(([name, ic]) => `
-                      <button type="button" data-settings-section="${name}" class="flex h-11 w-full items-center gap-2.5 rounded-md px-3 overflow-hidden sm:h-8 sm:gap-2 sm:px-2 ${state.settingsSection === name ? 'bg-interactive-hover text-foreground' : 'text-foreground hover:bg-interactive-hover'}">${icon(ic, 'remixicon h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4')}<span class="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100"><span class="typography-ui-label font-normal truncate">${name}</span></span></button>`).join('')}
+                      <button type="button" data-settings-section="${name}" class="flex h-11 w-full items-center gap-2.5 rounded-md px-3 overflow-hidden sm:h-8 sm:gap-2 sm:px-2 ${state.settingsSection === name ? 'bg-interactive-hover text-foreground' : 'text-foreground'}">${icon(ic, 'remixicon h-[18px] w-[18px] shrink-0 sm:h-4 sm:w-4')}<span class="flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150 opacity-100"><span class="typography-ui-label font-normal truncate">${name}</span></span></button>`).join('')}
                     </div>`).join('')}
                   </div>
                 </div>
@@ -1249,7 +1238,7 @@
         <div class="border-b border-border/60 px-3 py-1.5 typography-micro font-semibold uppercase tracking-wide text-muted-foreground">${esc(title)}</div>
         <div class="p-1">
           ${options.map((o) => `
-          <button type="button" data-menu-option="${key}" data-value="${esc(o.id)}" class="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm ${o.id === current ? 'bg-interactive-hover text-foreground' : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground'}">
+          <button type="button" data-menu-option="${key}" data-value="${esc(o.id)}" class="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm ${o.id === current ? 'bg-interactive-hover text-foreground' : 'text-muted-foreground hover:text-foreground'}">
             <span class="truncate">${esc(o.name)}</span>
             ${o.id === current ? icon('oc-check', 'remixicon h-3.5 w-3.5 text-primary') : ''}
           </button>`).join('')}
@@ -1515,22 +1504,6 @@
     $('[data-note-backdrop]', rootEl)?.addEventListener('click', () => { state.noteId = null; render(); });
   };
 
-  const bindWorkspace = (rootEl) => {
-    $$('[data-project-open]', rootEl).forEach((button) => button.addEventListener('click', () => openProject(button.dataset.projectOpen)));
-    $$('[data-project-new-chat]', rootEl).forEach((button) => button.addEventListener('click', (event) => {
-      event.stopPropagation();
-      const project = state.projects.find((item) => item.id === button.dataset.projectNewChat);
-      if (!project) return;
-      state.activeProjectId = project.id;
-      state.workspace = 'chat';
-      state.noteId = null;
-      state.panel = null;
-      createSession(project.id);
-      persistWorkspace();
-      render();
-    }));
-  };
-
   const bindChat = (rootEl) => {
     $$('[data-md-action="copy-code"]', rootEl).forEach((b) => b.addEventListener('click', () => {
       const pre = b.closest('[data-component="markdown-code"]').querySelector('pre');
@@ -1553,8 +1526,12 @@
       state.expandedTools[k] = !state.expandedTools[k];
       render();
     }));
-    bindWorkspace(rootEl);
     if (state.workspace === 'memory') bindMemory(rootEl);
+  };
+
+  const refreshSidebar = () => {
+    const sb = $('[data-sidebar-root]');
+    if (sb) { sb.innerHTML = tplSidebar(); bindSidebar(sb); }
   };
 
   const bindSidebar = (rootEl) => {
@@ -1587,7 +1564,13 @@
       persistWorkspace();
       render();
     }));
-    $$('[data-project-open]', rootEl).forEach((button) => button.addEventListener('click', () => openProject(button.dataset.projectOpen)));
+    $$('[data-project-open]', rootEl).forEach((button) => button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      state.modal = 'project-edit';
+      state.editProjectId = button.dataset.projectOpen;
+      state.modalAnchor = null;
+      render();
+    }));
     $$('[data-project-new-chat]', rootEl).forEach((button) => button.addEventListener('click', (event) => {
       event.stopPropagation();
       const project = state.projects.find((item) => item.id === button.dataset.projectNewChat);
@@ -1621,6 +1604,18 @@
     $$('[data-action="add-project"]', rootEl).forEach((button) => button.addEventListener('click', (event) => openSidebarPopup(event.currentTarget, 'project')));
     $('[data-action="archive-popup"]', rootEl)?.addEventListener('click', (event) => openSidebarPopup(event.currentTarget, 'archive'));
     $('[data-action="search-sessions"]', rootEl)?.addEventListener('click', (event) => openSidebarPopup(event.currentTarget, 'search'));
+    $('[data-chats-toggle]', rootEl)?.addEventListener('click', () => {
+      state.chatsCollapsed = !state.chatsCollapsed;
+      LS.set('oc-clone-chats-collapsed', state.chatsCollapsed);
+      const list = $('[data-chats-list]', rootEl);
+      if (list) list.hidden = state.chatsCollapsed;
+      const toggle = $('[data-chats-toggle]', rootEl);
+      if (toggle) {
+        toggle.setAttribute('aria-expanded', String(!state.chatsCollapsed));
+        const chevron = toggle.querySelector('span');
+        if (chevron) chevron.classList.toggle('-rotate-90', state.chatsCollapsed);
+      }
+    });
     const handle = $('[data-action="resize-sidebar"]', rootEl);
     if (handle) {
       handle.addEventListener('mousedown', (e) => {
@@ -1631,10 +1626,14 @@
           state.sidebarW = w;
           LS.set('oc-clone-sbw', w);
           const aside = $('aside', rootEl);
-          aside.style.width = w + 'px';
-          aside.style.minWidth = w + 'px';
-          aside.style.maxWidth = w + 'px';
-          aside.style.setProperty('--oc-left-sidebar-width', w + 'px');
+          const content = aside ? aside.querySelector('[data-sidebar-content]') : null;
+          [aside, content].forEach((el) => {
+            if (!el) return;
+            el.style.width = w + 'px';
+            el.style.minWidth = w + 'px';
+            el.style.maxWidth = w + 'px';
+          });
+          if (aside) aside.style.setProperty('--oc-left-sidebar-width', w + 'px');
         };
         const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
         document.addEventListener('mousemove', move);
@@ -1650,14 +1649,12 @@
     $$('[aria-label="Settings"]', rootEl).forEach((b) => b.addEventListener('click', () => { state.settings = true; render(); }));
     $$('[aria-label="Open sessions"]', rootEl).forEach((b) => b.addEventListener('click', () => {
       state.sidebarOpen = !state.sidebarOpen;
-      const sb = $('[data-sidebar-root]');
-      sb.innerHTML = tplSidebar();
-      bindSidebar(sb);
+      refreshSidebar();
     }));
   };
 
   const bindActionModal = (rootEl) => {
-    const closeActionModal = () => { state.modal = null; state.modalAnchor = null; render(); };
+    const closeActionModal = () => { state.modal = null; state.modalAnchor = null; state.editProjectId = null; render(); };
     $$('[data-action="close-modal"]', rootEl).forEach((button) => button.addEventListener('click', closeActionModal));
     rootEl.addEventListener('mousedown', (event) => { if (event.target === rootEl) closeActionModal(); });
     $('[data-project-form]', rootEl)?.addEventListener('submit', (event) => {
@@ -1667,6 +1664,25 @@
       const error = $('[data-project-error]', rootEl);
       if (!name || !folders.length) {
         if (error) error.textContent = !name ? 'Give this project a title.' : 'Select at least one folder.';
+        return;
+      }
+      if (state.modal === 'project-edit') {
+        const editId = state.editProjectId;
+        state.modal = null;
+        state.modalAnchor = null;
+        state.editProjectId = null;
+        const project = state.projects.find((item) => item.id === editId);
+        if (project) {
+          const oldName = project.name;
+          project.name = name;
+          project.folders = folders;
+          projectSessions(project.id).forEach((session) => {
+            if (session.title === `New chat · ${oldName}`) session.title = `New chat · ${name}`;
+          });
+          LS.set('oc-clone-projects', state.projects);
+          LS.set('oc-clone-sessions', state.sessions);
+        }
+        render();
         return;
       }
       const project = { id: uid(), name, folders, createdAt: new Date().toISOString() };
@@ -2140,14 +2156,14 @@
         </div>
         <div id="oc-clone-palette-results" class="max-h-[40vh] overflow-y-auto p-1.5">
           ${state.sessions.map((s) => `
-          <button type="button" data-pal-session="${s.id}" class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-foreground hover:bg-interactive-hover">
+          <button type="button" data-pal-session="${s.id}" class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-foreground">
             ${icon('oc-chat-new', 'remixicon h-4 w-4 text-muted-foreground')}
             <span class="truncate">${esc(s.title)}</span>
             ${s.id === state.activeId ? '<span class="ml-auto rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">active</span>' : ''}
           </button>`).join('')}
           <div class="mt-1 border-t border-border/60 pt-1">
             ${[['oc-palette', 'Toggle theme'], ['oc-settings-3', 'Open settings']].map(([ic, label]) => `
-            <button type="button" data-pal-cmd="${label}" class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-muted-foreground hover:bg-interactive-hover hover:text-foreground">
+            <button type="button" data-pal-cmd="${label}" class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-muted-foreground hover:text-foreground">
               ${icon(ic, 'remixicon h-4 w-4')}<span>${label}</span>
             </button>`).join('')}
           </div>
@@ -2236,6 +2252,10 @@
   };
 
   const bindGlobal = () => {
+    $('[data-topbar-toggle]')?.addEventListener('click', () => {
+      state.sidebarOpen = !state.sidebarOpen;
+      refreshSidebar();
+    });
     document.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();

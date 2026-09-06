@@ -191,9 +191,6 @@ nav[aria-label="Panel surfaces"] button:active {
 nav[aria-label="Panel surfaces"] button {
   transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms ease, background-color 150ms ease;
 }
-nav[aria-label="Panel surfaces"] button:hover {
-  background-color: var(--interactive-hover);
-}
 
 /* ============ STACKING / DIALOG / MENU ============ */
 [data-settings-backdrop] {
@@ -319,7 +316,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   border: 1px solid transparent;
   border-radius: 8px;
 }
-.oc-variant-close:hover { color: #fff; background: rgb(255 255 255 / .08); border-color: rgb(255 255 255 / .14); }
 .oc-variant-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -339,7 +335,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   border-radius: 12px;
   transition: background-color 150ms ease, border-color 150ms ease, transform 150ms ease;
 }
-.oc-variant-option:hover { background: rgb(255 255 255 / .07); border-color: rgb(255 255 255 / .32); transform: translateY(-1px); }
 .oc-variant-option[aria-checked="true"] { color: rgb(255 255 255 / .7); background: rgb(255 255 255 / .08); border-color: rgb(255 255 255 / .62); box-shadow: inset 0 0 0 1px rgb(255 255 255 / .08); }
 .oc-variant-option-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #fff; font-size: 15px; }
 .oc-variant-option > span:last-child { font-size: 12px; line-height: 1.45; }
@@ -458,10 +453,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   font-size: 13px;
   font-weight: 560;
 }
-.zeno-new-chat-button:hover {
-  background: color-mix(in srgb, var(--primary) 16%, transparent);
-  border-color: color-mix(in srgb, var(--primary) 22%, transparent);
-}
 .zeno-new-chat-button kbd {
   margin-left: auto;
   border: 1px solid var(--interactive-border);
@@ -482,10 +473,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   color: color-mix(in srgb, var(--foreground) 72%, transparent);
   font-size: 13px;
   transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
-}
-.zeno-sidebar-nav-item:hover {
-  color: var(--foreground);
-  background: var(--interactive-hover);
 }
 .zeno-sidebar-nav-item.is-active {
   color: var(--foreground);
@@ -508,8 +495,7 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   flex: 0 0 auto;
   color: var(--muted-foreground);
 }
-.zeno-sidebar-nav-item.is-active .zeno-sidebar-nav-icon,
-.zeno-sidebar-nav-item:hover .zeno-sidebar-nav-icon {
+.zeno-sidebar-nav-item.is-active .zeno-sidebar-nav-icon {
   color: var(--foreground);
 }
 .zeno-sidebar-nav-description {
@@ -522,7 +508,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   gap: 8px;
   margin: 12px 0 2px;
   padding: 9px 4px 5px 8px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   color: var(--muted-foreground);
   font-size: 10px;
   font-weight: 650;
@@ -537,10 +522,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   height: 25px;
   border-radius: 6px;
   color: var(--muted-foreground);
-}
-.zeno-sidebar-tool:hover {
-  color: var(--foreground);
-  background: var(--interactive-hover);
 }
 .zeno-sidebar-tool-primary {
   color: var(--primary);
@@ -578,9 +559,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   font-size: 12px;
   font-weight: 550;
 }
-.zeno-project-open:hover {
-  background: var(--interactive-hover);
-}
 .zeno-project-open .zeno-sidebar-nav-icon {
   color: #ffffff;
 }
@@ -594,15 +572,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
 .zeno-project-group:hover .zeno-project-add,
 .zeno-project-group:focus-within .zeno-project-add {
   opacity: 1;
-}
-.zeno-project-folders {
-  overflow: hidden;
-  padding: 0 9px 2px 34px;
-  color: var(--muted-foreground);
-  font-size: 10px;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .zeno-project-chats {
   margin-top: 2px;
@@ -652,9 +621,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   font-size: 10px;
   font-weight: 600;
 }
-.zeno-empty-project-cta:hover {
-  background: color-mix(in srgb, var(--primary) 13%, transparent);
-}
 .zeno-sidebar-empty-icon {
   display: inline-flex;
   margin-top: 1px;
@@ -672,10 +638,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   padding: 0 8px;
   color: var(--muted-foreground);
   font-size: 11px;
-}
-.zeno-sidebar-footer-button:hover {
-  color: var(--foreground);
-  background: var(--interactive-hover);
 }
 
 /* ============ WORKSPACE LANDING VIEWS (removed pages) ============ */
@@ -700,9 +662,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   color: var(--background);
   font-size: 12px;
   font-weight: 650;
-}
-.project-primary-button:hover {
-  opacity: .86;
 }
 
 /* ============ MEMORY CONSTELLATION ============ */
@@ -820,10 +779,6 @@ body:has(.memory-view) [data-panel-root] {
   color: #dedbff;
   background: rgb(139 124 255 / .11);
   font-size: 11px;
-}
-.memory-capture-button:hover {
-  border-color: rgb(139 124 255 / .62);
-  background: rgb(139 124 255 / .18);
 }
 .memory-map-viewport {
   position: relative;
@@ -1142,8 +1097,6 @@ body:has(.memory-view) [data-panel-root] {
 .memory-editor-save { color: #050505; background: #fff; }
 .memory-editor-discard { color: #bbb; background: rgb(255 255 255 / .07); }
 .memory-editor-preview { color: #d0d0d0; background: rgb(255 255 255 / .05); }
-.memory-editor-preview:hover,
-.memory-editor-discard:hover { color: #fff; background: rgb(255 255 255 / .12); }
 .memory-note-actions {
   display: flex;
   gap: 4px;
@@ -1157,10 +1110,6 @@ body:has(.memory-view) [data-panel-root] {
   flex: 0 0 auto;
   border-radius: 7px;
   color: #9ca6ba;
-}
-.memory-icon-button:hover {
-  color: #f4f5f8;
-  background: rgb(255 255 255 / .08);
 }
 .memory-note-scroll {
   min-height: 0;
@@ -1473,10 +1422,6 @@ body:has(.memory-view) [data-panel-root] {
 }
 .project-secondary-button {
   color: var(--muted-foreground);
-}
-.project-secondary-button:hover {
-  color: var(--foreground);
-  background: var(--interactive-hover);
 }
 
 @media (max-width: 760px) {

@@ -18,4 +18,7 @@
 .empty-chat-copy [data-quick-action].is-drag-target { transform: translateY(-4px) scale(1.04); }
 .empty-chat-copy [data-chip] { background: rgb(10 10 12 / .28); border-color: rgb(255 255 255 / .17); backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px); }
 body:has(.empty-chat-stage) main, body:has(.empty-chat-stage) #chat-root { background: transparent !important; }
+/* Hide right icon rail while no first message was sent (empty chat). */
+body:has(.empty-chat-stage) [data-nav-root] { display: none !important; }
+body:has(.empty-chat-stage) .workspace-stage > .relative.z-20 { display: none !important; }
 @media (max-height: 700px) { .empty-chat-surface { padding-bottom: 22px; } .empty-chat-copy { width: min(598px, 88%); } }

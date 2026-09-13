@@ -223,6 +223,9 @@
     theme: 'dark', // 'light' | 'dark'
     colorMode: 'dark',
     design: LS.get('oc-clone-design', 'Default'),
+    model: LS.get('oc-clone-model', 'DeepSeek V4 Pro'),
+    voiceMode: false,
+    voiceLang: LS.get('oc-clone-voice-lang', (navigator.language || 'pt-BR').startsWith('en') ? 'en-US' : (navigator.language || 'pt-BR').startsWith('es') ? 'es-ES' : 'pt-BR'),
     lightTheme: LS.get('oc-clone-light-theme', 'openchamber-light'),
     darkTheme: LS.get('oc-clone-dark-theme', 'openchamber-dark'),
     sidebarW: LS.get('oc-clone-sbw', 280),
@@ -293,7 +296,7 @@
   const icon = (name, cls = 'remixicon h-[18px] w-[18px]') =>
     `<svg class="${cls}" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#${name}"></use></svg>`;
 
-  const activeSession = () => state.sessions.find((s) => s.id === state.activeId) || state.sessions[0];
+  const activeSession = () => state.draftNew ? null : (state.sessions.find((s) => s.id === state.activeId) || state.sessions[0]);
   const activeProject = () => state.projects.find((project) => project.id === state.activeProjectId) || null;
   const projectSessions = (projectId) => state.sessions.filter((session) => session.projectId === projectId);
   const persistWorkspace = () => {
@@ -311,6 +314,7 @@
     };
     state.sessions.unshift(session);
     state.activeId = session.id;
+    state.draftNew = false;
     LS.set('oc-clone-sessions', state.sessions);
     return session;
   };
@@ -543,7 +547,7 @@
 
   const tplSidebarHeader = () => `
     <div class="zeno-sidebar-header select-none flex-shrink-0">
-      <button type="button" data-action="new-session" class="zeno-new-chat-button">
+      <button type="button" data-action="new-session" class="zeno-new-chat-button ${state.workspace === 'chat' && state.draftNew ? 'is-active' : ''}">
         <span class="zeno-sidebar-nav-icon">${icon('oc-chat-new', 'remixicon h-4 w-4')}</span>
         <span class="truncate">New chat</span>
         <kbd>Ctrl N</kbd>
@@ -561,7 +565,7 @@
       </div>
     </div>`;
 
-  const tplSessionRow = (s, indent = 26) => {
+  const tplSessionRow = (s, indent = 29) => {
     const active = s.id === state.activeId;
     return `
       <div role="button" tabindex="0" data-session-id="${s.id}">
@@ -597,7 +601,7 @@
   const tplSidebar = () => `
     <aside class="relative flex h-full overflow-hidden border-r will-change-[width] motion-reduce:transition-none bg-sidebar oc-vibrancy-surface shadow-[inset_-2px_0_10px_-2px_rgb(0_0_0_/_0.06)] border-border" aria-hidden="${!state.sidebarOpen}" style="width: ${state.sidebarOpen ? state.sidebarW : 0}px; min-width: ${state.sidebarOpen ? state.sidebarW : 0}px; max-width: ${state.sidebarOpen ? state.sidebarW : 0}px; --oc-left-sidebar-width: ${state.sidebarOpen ? state.sidebarW : 0}px; overflow-x: clip; transition-property: width, min-width, max-width; transition-duration: 200ms; transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);">
       <div class="absolute right-0 top-0 z-20 h-full w-[3px] cursor-col-resize hover:bg-[var(--interactive-border)]/80 transition-colors" role="separator" aria-orientation="vertical" aria-label="Resize left panel" data-action="resize-sidebar"></div>
-      <div data-sidebar-content class="relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none" aria-hidden="false" style="width: ${state.sidebarOpen ? state.sidebarW : 0}px; overflow-x: hidden;">
+      <div data-sidebar-content class="relative z-10 flex h-full shrink-0 flex-col motion-reduce:transition-none" aria-hidden="false" style="width: ${state.sidebarOpen ? state.sidebarW : 0}px; overflow-x: hidden; transition-property: width, min-width, max-width, opacity; transition-duration: 200ms; transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);">
         <div aria-hidden="true" class="flex shrink-0" style="height: var(--oc-header-height, 3rem);"></div>
         <div class="min-h-0 flex-1 overflow-y-auto">
           <div class="relative flex h-full flex-col text-foreground overflow-x-hidden bg-transparent">
@@ -615,7 +619,7 @@
                         </button>
                       </div>
                       <div class="space-y-0.5" data-chats-list${state.chatsCollapsed ? ' hidden' : ''}>
-                        ${state.sessions.map(tplSessionRow).join('')}
+                        ${state.sessions.map((s) => tplSessionRow(s)).join('')}
                         <button type="button" class="mt-0.5 flex items-center justify-start rounded-md pl-[26px] pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline">Show more sessions</button>
                       </div>
                     </div>
@@ -631,7 +635,10 @@
       </div>
     </aside>`;
 
-  const tplNav = () => `
+  const tplNav = () => {
+    const s = activeSession();
+    if (state.workspace === 'chat' && (!s || !s.messages.length)) return '';
+    return `
     <nav aria-label="Panel surfaces" class="flex h-full w-11 flex-shrink-0 flex-col items-center gap-1 bg-background py-2">
       ${Object.entries(PANELS).map(([label, [ic]]) => {
         const on = state.panel === label;
@@ -640,6 +647,7 @@
       <div class="relative"><button type="button" role="button" tabindex="0" data-panel-btn="${label}" aria-label="${label}" title="${label}" aria-pressed="${on}" class="flex h-9 w-9 touch-none select-none items-center justify-center rounded-md transition-colors ${on ? 'text-foreground bg-interactive-hover' : 'text-muted-foreground hover:text-foreground'}${extra}">${icon(ic, 'remixicon h-[18px] w-[18px]')}</button></div>`;
       }).join('')}
     </nav>`;
+  };
 
   /* ---------- templates: composer ---------- */
   const getQuickActions = () => {
@@ -667,24 +675,15 @@
               </div>
             </div>
           </div>
-          <div class="bg-transparent flex-shrink-0 px-2.5 py-1.5 flex items-center justify-between gap-x-1.5 gap-y-0" data-chat-input-footer="true" style="border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl);">
-            <div class="flex items-center flex-shrink-0 gap-x-1.5 gap-y-0">
-              <div class="flex items-center gap-x-1.5">
-                <button type="button" class="flex cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed h-6 w-6" title="Add attachment" aria-label="Add attachment">${icon('oc-add-circle')}</button>
-              </div>
+          <div class="bg-transparent flex-shrink-0 px-2.5 py-1.5 flex items-center justify-between gap-1" data-chat-input-footer="true" style="border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl);">
+            <div class="flex items-center gap-1">
+              <button type="button" data-action="attach" class="zeno-icon-btn" title="Adicionar anexo" aria-label="Adicionar anexo">${icon('oc-add-circle', 'remixicon h-[18px] w-[18px]')}</button>
             </div>
-            <div class="flex items-center flex-1 justify-end gap-x-1.5 gap-y-0 md:gap-x-3">
-              <div class="@container/model-controls flex items-center flex-1 min-w-0 justify-end">
-                <div class="flex items-center min-w-0 flex-1 justify-end gap-x-3">
-                  <div class="model-controls__variant-trigger flex items-center gap-1.5 transition-colors cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0 h-8" tabindex="0" data-menu="variant" role="button" aria-haspopup="dialog" aria-label="Choose response design"><span class="model-controls__variant-label typography-meta font-medium min-w-0 truncate text-muted-foreground">${esc(state.design)}</span></div>
-                  <div class="model-controls__model-trigger flex items-center gap-1.5 cursor-pointer hover:bg-transparent hover:opacity-70 min-w-0 h-8" tabindex="0" data-menu="model">
-                    <span class="model-controls__model-label overflow-hidden typography-meta font-medium whitespace-nowrap text-foreground min-w-0 max-w-[260px]"><span class="marquee-text">DeepSeek V4 Pro</span></span>
-                  </div>
-                </div>
-              </div>
+            <div class="flex items-center gap-1">
               <span data-dictation-label aria-live="polite"></span>
-              <button type="button" data-action="dictation" data-dictation-phase="idle" class="flex cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed h-6 w-6" title="Start dictation" aria-label="Start dictation">${icon('oc-mic')}</button>
-              <button type="submit" data-action="send" class="flex cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed h-6 w-6 opacity-30" aria-label="Send message">${icon('oc-send-plane-2', 'remixicon h-4 w-4')}</button>
+              <button type="button" data-action="voice-mode" class="zeno-icon-btn" title="Conversar por voz" aria-label="Conversar por voz">${icon('oc-pulse', 'remixicon h-[18px] w-[18px]')}</button>
+              <button type="button" data-action="dictation" data-dictation-phase="idle" class="zeno-icon-btn" title="Ditar mensagem" aria-label="Ditar mensagem">${icon('oc-mic', 'remixicon h-[18px] w-[18px]')}</button>
+              <button type="submit" data-action="send" class="zeno-icon-btn" aria-label="Send message">${icon('oc-send-plane-2', 'remixicon h-[18px] w-[18px]')}</button>
             </div>
           </div>
         </div>
@@ -841,14 +840,13 @@
   const tplMemoryNode = (note) => {
     const x = note.x * 16, y = note.y * 9, size = note.root ? 26 : 18;
     return `<g data-memory-note="${esc(note.id)}" class="memory-node ${note.root ? 'memory-node-root' : ''}" transform="translate(${x} ${y})" tabindex="0" role="button" aria-label="Open ${esc(note.title)}">
-      <rect x="${-size / 2}" y="${-size / 2}" width="${size}" height="${size}" rx="${note.root ? 6 : 4}" class="memory-node-shape"></rect>
+      <circle cx="0" cy="0" r="${size / 2}" class="memory-node-shape"></circle>
       <text y="${size / 2 + 20}" text-anchor="middle" class="memory-node-label">${esc(note.title)}</text>
-      <g class="memory-node-actions" transform="translate(-72 ${-size / 2 - 38})">
-        <rect width="144" height="30" rx="7" class="memory-node-actions-bg"></rect>
-        <g data-memory-action="rename" transform="translate(18 15)"><text text-anchor="middle" dominant-baseline="central">R</text><title>Rename</title></g>
-        <g data-memory-action="edit" transform="translate(54 15)"><text text-anchor="middle" dominant-baseline="central">E</text><title>Edit</title></g>
-        <g data-memory-action="view" transform="translate(90 15)"><text text-anchor="middle" dominant-baseline="central">V</text><title>View</title></g>
-        <g data-memory-action="delete" transform="translate(126 15)"><text text-anchor="middle" dominant-baseline="central">D</text><title>Delete</title></g>
+      <g class="memory-node-actions" transform="translate(-54 ${-size / 2 - 32})">
+        <rect width="108" height="32" rx="7" class="memory-node-actions-bg"></rect>
+        <g data-memory-action="edit" transform="translate(18 16)"><rect x="-12" y="-12" width="24" height="24" fill="transparent"></rect><use href="#oc-edit" x="-7" y="-7" width="14" height="14"></use><title>Edit</title></g>
+        <g data-memory-action="view" transform="translate(54 16)"><rect x="-12" y="-12" width="24" height="24" fill="transparent"></rect><use href="#oc-eye" x="-7" y="-7" width="14" height="14"></use><title>View</title></g>
+        <g data-memory-action="delete" transform="translate(90 16)"><rect x="-12" y="-12" width="24" height="24" fill="transparent"></rect><use href="#oc-delete-bin" x="-7" y="-7" width="14" height="14"></use><title>Delete</title></g>
       </g>
     </g>`;
   };
@@ -872,9 +870,25 @@
         </header>
         <div class="memory-note-scroll">
           <div class="memory-note-content">${editing ? `<textarea data-memory-content class="memory-editor-content" aria-label="Note content">${esc(state.memoryEditor.content)}</textarea>` : renderMarkdown(note.content)}</div>
-          <footer class="memory-note-footer"><span>Captured by Zeno Agent</span><span>${esc(note.updated)}</span></footer>
+          <footer class="memory-note-footer"><span>Captured by ${esc(note.by || 'Zeno Agent')}</span><span>${esc(note.updated)}</span></footer>
         </div>
       </article>
+    </div>`;
+  };
+
+  const tplMemoryDeleteModal = () => {
+    const note = memoryNoteById(state.memoryDeleteId);
+    if (!note) return '';
+    return `<div class="memory-confirm-layer">
+      <div class="memory-confirm-backdrop" data-memory-confirm-cancel></div>
+      <div role="dialog" aria-modal="true" class="memory-confirm-dialog">
+        <h3>Delete note</h3>
+        <p>“${esc(note.title)}” will be removed together with its links.</p>
+        <div class="memory-confirm-actions">
+          <button type="button" data-memory-confirm-cancel class="memory-confirm-btn memory-confirm-secondary">Cancel</button>
+          <button type="button" data-memory-confirm-accept class="memory-confirm-btn memory-confirm-primary">Delete</button>
+        </div>
+      </div>
     </div>`;
   };
 
@@ -899,6 +913,7 @@
         <div class="memory-map-help">Drag to move · Scroll to zoom · Double-click a node to open</div>
       </div>
       ${tplMemoryNoteModal()}
+      ${tplMemoryDeleteModal()}
     </div>`;
   };
 
@@ -963,15 +978,18 @@
     }
     if (state.modal === 'project' || state.modal === 'project-edit') {
       const editing = state.modal === 'project-edit' ? state.projects.find((item) => item.id === state.editProjectId) : null;
-      const currentFolders = editing ? editing.folders : [];
-      return `<div class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-3 backdrop-blur-[3px] oc-backdrop" data-action-modal>
+      if (!Array.isArray(state.draftFolders)) state.draftFolders = editing ? [...editing.folders] : [];
+      return `<div class="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-3 backdrop-blur-[3px] oc-backdrop" data-action-modal style="background-color: rgb(0 0 0 / 0.8)">
         <div role="dialog" aria-modal="true" aria-label="${editing ? 'Edit project' : 'Create project'}" class="oc-dialog project-dialog">
           <header class="project-dialog-header"><div><div class="workspace-eyebrow">Workspace / Projects</div><h2>${editing ? 'Edit project' : 'Create a project'}</h2><p>Defina um contexto durável para seus chats e pastas.</p></div><button type="button" data-action="close-modal" aria-label="Close dialog" class="memory-icon-button">${icon('oc-close', 'remixicon h-4 w-4')}</button></header>
           <form data-project-form class="project-dialog-form">
             <div class="project-form-main">
               <label class="project-field"><span>Project title</span><input required data-project-name class="project-title-input" value="${editing ? esc(editing.name) : ''}" placeholder="Ex.: Website da oficina" autocomplete="off"></label>
-              <div class="project-folder-heading"><div><span>Attach folders</span><small>Escolha uma ou mais pastas para dar ao projeto seu contexto.</small></div><span class="project-folder-count" data-project-folder-count>${currentFolders.length} selected</span></div>
-              <div class="project-folder-grid">${PROJECT_FOLDERS.map((folder) => `<label class="project-folder-option"><input type="checkbox" value="${folder}" data-project-folder${currentFolders.includes(folder) ? ' checked' : ''}><span class="project-folder-check">${icon('oc-check', 'remixicon h-3 w-3')}</span><span class="project-folder-icon">${icon('oc-folder', 'remixicon h-4 w-4')}</span><span>${folder}</span></label>`).join('')}</div>
+              <div class="project-folder-heading"><div><span>Attach folders</span><small>Escolha uma ou mais pastas do seu computador para dar ao projeto seu contexto.</small></div><span class="project-folder-count" data-project-folder-count>${state.draftFolders.length} selected</span></div>
+              <div class="project-folder-list" data-project-folder-list>
+                ${state.draftFolders.length ? state.draftFolders.map((folder, index) => `<span class="project-folder-chip"><span class="project-folder-icon">${icon('oc-folder', 'remixicon h-4 w-4')}</span><span class="project-folder-name">${esc(folder)}</span><button type="button" data-remove-folder="${index}" aria-label="Remove folder">${icon('oc-close', 'remixicon h-3 w-3')}</button></span>`).join('') : '<span class="project-folder-empty">Nenhuma pasta selecionada ainda.</span>'}
+              </div>
+              <button type="button" data-action="pick-folder" class="project-folder-add">${icon('oc-folder-add', 'remixicon h-4 w-4')}<span>Adicionar pasta</span></button>
               <p class="project-form-error" data-project-error role="alert"></p>
             </div>
             <aside class="project-dialog-aside"><div class="project-aside-icon">${icon('oc-folder-add', 'remixicon h-6 w-6')}</div><strong>One context, many chats</strong><p>Os chats criados dentro deste projeto vão compartilhar as pastas selecionadas sem misturar o restante do seu workspace.</p><div class="project-aside-rule"></div><span>${icon('oc-information', 'remixicon h-3.5 w-3.5')} Stored locally in this browser</span></aside>
@@ -1129,21 +1147,12 @@
 
   /* ---------- templates: settings ---------- */
   const SETTINGS_GROUPS = [
-    ['', [
-      ['General', 'oc-settings-3'], ['Appearance', 'oc-palette'], ['Chat', 'oc-chat-ai-3'], ['Notifications', 'oc-notification-3'],
-      ['Sessions', 'oc-chat-history'], ['Shortcuts', 'oc-command'], ['Voice', 'oc-mic'], ['Usage', 'oc-bar-chart-2'],
+    ['General', [
+      ['Appearance', 'oc-palette'], ['Chat', 'oc-chat-ai-3'], ['Notifications', 'oc-notification-3'],
+      ['Shortcuts', 'oc-command'], ['Voice', 'oc-mic'], ['Usage', 'oc-bar-chart-2'],
     ]],
     ['Workspace', [
-      ['Projects', 'oc-folder'], ['Remote Instances', 'oc-server'], ['External', 'oc-link-unlink-m'], ['Tunnel beta', 'oc-route'], ['Git', 'oc-git-branch'],
-    ]],
-    ['OpenCode', [
-      ['Providers', 'oc-database-2'], ['Agents', 'oc-ai-agent'], ['Behavior', 'oc-equalizer-2'],
-    ]],
-    ['Commands', [
-      ['MCP', 'oc-plug-2'], ['Plugins', 'oc-puzzle-2'],
-    ]],
-    ['Library', [
-      ['Magic Prompts', 'oc-ai-generate-2'], ['Snippets', 'oc-chat-thread'],
+      ['Projects', 'oc-folder'], ['Remote Instances', 'oc-server'], ['Plugins', 'oc-puzzle-2'],
     ]],
   ];
 
@@ -1260,8 +1269,8 @@
   };
 
   const tplSettings = () => `
-    <div class="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 oc-backdrop" data-settings-backdrop>
-      <div role="dialog" aria-label="OpenChamber settings window." data-open="" class="oc-dialog relative pointer-events-auto w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px] rounded-xl border shadow-none overflow-hidden origin-center bg-background transition-all duration-150 ease-out" style="--nested-dialogs: 0; height: min(85vh, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); max-width: min(1200px, calc(100vw - 24px));">
+    <div class="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 oc-backdrop" data-settings-backdrop style="background-color: rgb(0 0 0 / 0.8)">
+      <div role="dialog" aria-label="OpenChamber settings window." data-open="" class="oc-dialog relative pointer-events-auto w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px] rounded-xl border shadow-none overflow-hidden origin-center bg-background transition-all duration-150 ease-out" style="--nested-dialogs: 0; height: min(85vh, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); max-width: min(805px, calc(100vw - 24px));">
         <div class="absolute right-0.5 z-50 top-0.5">
           <button type="button" aria-label="Close settings" title="Close Settings (Ctrl+,)" data-action="close-settings" class="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none">${icon('oc-close', 'remixicon h-5 w-5')}</button>
         </div>
@@ -1269,9 +1278,6 @@
           <div class="flex flex-1 min-h-0 overflow-hidden">
             <div class="relative flex h-full min-h-0 flex-col overflow-hidden border-r bg-sidebar" style="width: 256px; min-width: 256px; border-color: var(--interactive-border);">
               <div class="flex h-full flex-col overflow-hidden">
-                <div class="px-4 pt-3">
-                  <div class="flex h-10 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2 text-muted-foreground focus-within:ring-2 focus-within:ring-primary/40 sm:h-8">${icon('oc-search', 'remixicon h-4 w-4 shrink-0')}<input placeholder="Search settings" aria-label="Search settings" class="typography-ui min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground/70"></div>
-                </div>
                 <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
                   <div class="flex flex-col gap-0.5 px-4 pt-4 pb-2">
                     ${SETTINGS_GROUPS.map(([group, items]) => `
@@ -1351,6 +1357,8 @@
 
   const render = () => {
     applyTheme();
+    document.body.classList.toggle('zeno-voice-active', state.voiceMode);
+    renderVoice();
     const chat = $('#chat-root');
     if (chat) {
       const scroller = $('[data-scrollbar="chat"]', chat);
@@ -1367,7 +1375,14 @@
     const panel = $('[data-panel-root]');
     if (panel) { panel.innerHTML = tplPanel(); bindPanel(panel); }
     const settings = $('[data-settings-root]');
-    if (settings) { settings.innerHTML = state.settings ? tplSettings() : ''; if (state.settings) bindSettings(settings); }
+    if (settings) {
+      const sig = state.settings ? [state.settingsSection, state.colorMode, state.lightTheme, state.darkTheme].join('|') : '';
+      if (settings.dataset.sig !== sig) {
+        settings.innerHTML = state.settings ? tplSettings() : '';
+        settings.dataset.sig = sig;
+        if (state.settings) bindSettings(settings);
+      }
+    }
     const actionModal = $('[data-action-modal-root]');
     if (actionModal) { actionModal.innerHTML = tplActionModal(); if (state.modal) bindActionModal(actionModal); }
     const chat2 = $('#chat-root');
@@ -1406,7 +1421,7 @@
   };
 
   const createMemoryNoteAt = (x, y) => {
-    const note = { id: 'memory_' + uid(), title: 'Untitled note', tag: 'Note', excerpt: '', content: '# Untitled note\n\nStart writing here.', accent: '#fff', x, y, updated: 'agora' };
+    const note = { id: 'memory_' + uid(), title: 'Untitled note', tag: 'Note', excerpt: '', content: '# Untitled note\n\nStart writing here.', accent: '#fff', x, y, updated: 'agora', by: 'User' };
     state.memoryNotes.push(note);
     openMemoryEditor(note, true);
   };
@@ -1442,6 +1457,7 @@
         if (event.button === 2 && targetNode) {
           event.preventDefault();
           connectingFrom = targetNode;
+          state.memoryLinkPending = true;
           const matrix = targetNode.transform.baseVal.getItem(0).matrix;
           connectionLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
           connectionLine.setAttribute('class', 'memory-edge memory-edge-preview');
@@ -1452,6 +1468,7 @@
           return;
         }
         if (event.button !== 0) return;
+        if (event.target.closest('[data-memory-action]')) return;
         draggedNode = targetNode;
         dragging = true;
         if (draggedNode) {
@@ -1524,6 +1541,7 @@
       }, { passive: false });
       viewport.addEventListener('contextmenu', (event) => {
         event.preventDefault();
+        if (state.memoryLinkPending) { state.memoryLinkPending = false; return; }
         if (event.target.closest('[data-memory-note]')) return;
         const point = nodePoint(event);
         createMemoryNoteAt(Math.max(2, Math.min(98, point.x / 16)), Math.max(3, Math.min(97, point.y / 9)));
@@ -1540,12 +1558,23 @@
         const title = window.prompt('Rename note', note.title)?.trim();
         if (title) { note.title = title; LS.set('oc-clone-memory-notes', state.memoryNotes); render(); }
       }
-      if (type === 'delete' && window.confirm(`Delete “${note.title}”?`)) {
+      if (type === 'delete') { state.memoryDeleteId = note.id; render(); }
+    }));
+    $$('[data-memory-confirm-cancel]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      state.memoryDeleteId = null;
+      render();
+    }));
+    $('[data-memory-confirm-accept]', rootEl)?.addEventListener('click', () => {
+      const note = memoryNoteById(state.memoryDeleteId);
+      if (note) {
         state.memoryNotes = state.memoryNotes.filter((item) => item.id !== note.id);
         state.memoryEdges = state.memoryEdges.filter((edge) => !edge.includes(note.id));
-        LS.set('oc-clone-memory-notes', state.memoryNotes); LS.set('oc-clone-memory-edges', state.memoryEdges); render();
+        LS.set('oc-clone-memory-notes', state.memoryNotes);
+        LS.set('oc-clone-memory-edges', state.memoryEdges);
       }
-    }));
+      state.memoryDeleteId = null;
+      render();
+    });
     $('[data-action="edit-memory-note"]', rootEl)?.addEventListener('click', () => openMemoryEditor(memoryNoteById(state.noteId)));
     $('[data-action="save-memory-note"]', rootEl)?.addEventListener('click', () => {
       const note = memoryNoteById(state.noteId);
@@ -1602,6 +1631,7 @@
         const session = state.sessions.find((item) => item.id === state.activeId);
         state.activeProjectId = session?.projectId || null;
         state.workspace = 'chat';
+        state.draftNew = false;
         state.noteId = null;
         LS.set('oc-clone-active', state.activeId);
         persistWorkspace();
@@ -1612,7 +1642,7 @@
       state.workspace = 'chat';
       state.noteId = null;
       state.panel = null;
-      createSession(state.activeProjectId || null);
+      state.draftNew = true;
       persistWorkspace();
       render();
     });
@@ -1629,12 +1659,14 @@
       state.modal = 'project-edit';
       state.editProjectId = button.dataset.projectOpen;
       state.modalAnchor = null;
+      state.draftFolders = null;
       render();
     }));
     const openSidebarPopup = (button, modal, above = false) => {
       const rect = button.getBoundingClientRect();
       state.modalAnchor = { x: rect.x, y: rect.y, w: rect.width, h: rect.height, above };
       state.modal = modal;
+      if (modal === 'project') state.draftFolders = null;
       render();
     };
     $$('[data-action="add-project"]', rootEl).forEach((button) => button.addEventListener('click', (event) => openSidebarPopup(event.currentTarget, 'project')));
@@ -1699,7 +1731,7 @@
     }));
   };
 
-  const closeMenu = () => { state.modal = null; state.modalAnchor = null; state.menuId = null; state.editProjectId = null; };
+  const closeMenu = () => { state.modal = null; state.modalAnchor = null; state.menuId = null; state.editProjectId = null; state.draftFolders = null; };
   const archiveSessionById = (id) => {
     const index = state.sessions.findIndex((s) => s.id === id);
     if (index >= 0) {
@@ -1740,7 +1772,7 @@
     $('[data-project-form]', rootEl)?.addEventListener('submit', (event) => {
       event.preventDefault();
       const name = $('[data-project-name]', rootEl).value.trim();
-      const folders = $$('[data-project-folder]:checked', rootEl).map((input) => input.value);
+      const folders = [...(state.draftFolders || [])];
       const error = $('[data-project-error]', rootEl);
       if (!name || !folders.length) {
         if (error) error.textContent = !name ? 'Give this project a title.' : 'Select at least one folder.';
@@ -1770,16 +1802,50 @@
       LS.set('oc-clone-projects', state.projects);
       state.activeProjectId = project.id;
       state.workspace = 'chat';
+      state.draftNew = true;
       state.modal = null;
       state.modalAnchor = null;
       persistWorkspace();
       render();
     });
-    $$('[data-project-folder]', rootEl).forEach((input) => input.addEventListener('change', () => {
-      const count = $$('[data-project-folder]:checked', rootEl).length;
-      const label = $('[data-project-folder-count]', rootEl);
-      if (label) label.textContent = `${count} selected`;
-    }));
+    const addDraftFolder = (name) => {
+      if (!name) return;
+      if (!Array.isArray(state.draftFolders)) state.draftFolders = [];
+      if (!state.draftFolders.includes(name)) {
+        state.draftFolders.push(name);
+        render();
+      }
+    };
+    $('[data-action="pick-folder"]', rootEl)?.addEventListener('click', async () => {
+      if (window.showDirectoryPicker) {
+        try {
+          const dir = await window.showDirectoryPicker({ mode: 'read' });
+          addDraftFolder(dir.name);
+        } catch {}
+        return;
+      }
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.webkitdirectory = true;
+      input.multiple = true;
+      input.addEventListener('change', () => {
+        [...input.files].forEach((file) => {
+          const relative = file.webkitRelativePath || '';
+          const root = relative.split('/')[0];
+          if (root) addDraftFolder(root);
+        });
+      });
+      input.click();
+    });
+    $('[data-project-folder-list]', rootEl)?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-remove-folder]');
+      if (!button) return;
+      const index = Number(button.dataset.removeFolder);
+      if (Array.isArray(state.draftFolders) && index >= 0 && index < state.draftFolders.length) {
+        state.draftFolders.splice(index, 1);
+        render();
+      }
+    });
     $$('[data-menu-action]', rootEl).forEach((button) => button.addEventListener('click', () => {
       const action = button.dataset.menuAction;
       const id = state.menuId;
@@ -1796,14 +1862,14 @@
             state.workspace = 'chat';
             state.noteId = null;
             state.panel = null;
-            createSession(project.id);
+            state.draftNew = true;
             persistWorkspace();
           }
           closeMenu();
           render();
           return;
         }
-        if (action === 'rename') { state.modal = 'project-edit'; state.editProjectId = id; state.modalAnchor = null; render(); return; }
+        if (action === 'rename') { state.modal = 'project-edit'; state.editProjectId = id; state.modalAnchor = null; state.draftFolders = null; render(); return; }
         if (action === 'delete') { deleteProjectById(id); return; }
       }
       closeMenu();
@@ -1851,6 +1917,7 @@
       const session = state.sessions.find((item) => item.id === state.activeId);
       state.activeProjectId = session?.projectId || null;
       state.workspace = 'chat';
+      state.draftNew = false;
       state.modal = null;
       LS.set('oc-clone-active', state.activeId);
       persistWorkspace();
@@ -2006,10 +2073,57 @@
     return btoa(binary);
   };
 
-  const transcribeAudio = async (blob) => {
+  let deepgramConfigCache = null;
+  const loadDeepgramConfig = async () => {
+    if (deepgramConfigCache) return deepgramConfigCache;
+    const config = {
+      apiKey: window.DEEPGRAM_API_KEY || '',
+      language: window.DEEPGRAM_LANGUAGE || 'pt-BR',
+      model: window.DEEPGRAM_MODEL || 'nova-3',
+    };
+    try {
+      const response = await fetch('.env', { cache: 'no-store' });
+      if (response.ok) {
+        const text = await response.text();
+        const parse = (name, fallback) => {
+          const match = text.match(new RegExp(`^${name}=(.*)$`, 'm'));
+          return match ? match[1].trim().replace(/^["']|["']$/g, '') || fallback : fallback;
+        };
+        config.apiKey = config.apiKey || parse('DEEPGRAM_API_KEY', '');
+        config.language = parse('DEEPGRAM_LANGUAGE', config.language);
+        config.model = parse('DEEPGRAM_MODEL', config.model);
+      }
+    } catch {}
+    deepgramConfigCache = config;
+    return config;
+  };
+
+  const deepgramTranscribe = async (blob, langOverride) => {
+    const { apiKey, language, model } = await loadDeepgramConfig();
+    if (!apiKey) throw new Error('DEEPGRAM_API_KEY não configurada (use o .env, window.DEEPGRAM_API_KEY ou o ZenoAgent.exe).');
+    const url = new URL('https://api.deepgram.com/v1/listen');
+    url.searchParams.set('model', model);
+    url.searchParams.set('language', langOverride || language);
+    url.searchParams.set('punctuate', 'true');
+    url.searchParams.set('smart_format', 'true');
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Token ${apiKey}`, 'Content-Type': blob.type || 'audio/webm' },
+      body: blob,
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.err_msg || payload?.message || `Falha no Deepgram (${response.status}).`);
+    const transcript = payload?.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim();
+    if (!transcript) throw new Error('Nenhuma fala foi reconhecida.');
+    return transcript;
+  };
+
+  const transcribeAudio = async (blob, langOverride) => {
     const transcribe = window.go?.main?.App?.TranscribeAudio;
-    if (typeof transcribe !== 'function') throw new Error('Transcrição disponível somente no aplicativo Zeno Agent.exe.');
-    return String(await transcribe(await blobToBase64(blob), blob.type || 'audio/webm')).trim();
+    if (typeof transcribe === 'function') {
+      return String(await transcribe(await blobToBase64(blob), blob.type || 'audio/webm')).trim();
+    }
+    return deepgramTranscribe(blob, langOverride);
   };
 
   const setDictationUi = (rootEl, phase, message = '') => {
@@ -2086,16 +2200,381 @@
     });
   };
 
+  /* ---------- shared: models, delivery, slash helpers, voice mode ---------- */
+  const SLASH_LANGS = ['pt-BR', 'en-US', 'es-ES'];
+
+  const blackHoleSend = (payload) => {
+    try {
+      document.querySelector('.workspace-black-hole')?.contentWindow?.postMessage({ source: 'zeno-black-hole', ...payload }, '*');
+    } catch {}
+  };
+
+  const setModel = (name) => {
+    state.model = name;
+    LS.set('oc-clone-model', name);
+  };
+
+  const setDesign = (name) => {
+    state.design = name;
+    LS.set('oc-clone-design', state.design);
+  };
+
+  const flashComposerHint = (form, text) => {
+    const host = form || document;
+    host.querySelector('[data-composer-hint]')?.remove();
+    const hint = document.createElement('div');
+    hint.dataset.composerHint = 'true';
+    hint.className = 'zeno-composer-hint';
+    hint.textContent = text;
+    (form || document.body).appendChild(hint);
+    setTimeout(() => hint.remove(), 2400);
+  };
+
+  const deliverUserText = (text) => {
+    const clean = String(text || '').trim();
+    if (!clean || state.typing) return false;
+    if (state.draftNew) createSession(state.activeProjectId || null);
+    const s = activeSession();
+    if (!s) return false;
+    s.messages.push({ id: 'msg_' + uid(), role: 'user', text: clean, time: fmtTime(now()) });
+    state.liveTrace = [{ id: 'live_thinking', type: 'thinking', label: 'Thinking', icon: 'oc-brain-ai-3', text: 'Processando a solicitação…', meta: 'live' }];
+    state.typing = true;
+    render(true);
+    setTimeout(() => {
+      const reply = mockReply(clean);
+      reply.id = 'msg_' + uid();
+      s.messages.push(reply);
+      state.liveTrace = null;
+      state.typing = false;
+      LS.set('oc-clone-sessions', state.sessions);
+      render(true);
+      if (state.voiceMode && voiceRuntime && !voiceRuntime.stopped) {
+        voicePushLine(voiceRuntime, 'zeno', reply.text);
+        void voiceSpeak(voiceRuntime, reply.text);
+      }
+    }, 2200 + Math.random() * 800);
+    return true;
+  };
+
+  /* ---------- voice mode (Deepgram STT + black-hole reaction) ---------- */
+  let voiceRuntime = null;
+
+  const tplVoiceOverlay = () => {
+    if (!state.voiceMode) return '';
+    const runtime = voiceRuntime;
+    const status = runtime?.status || 'starting';
+    const statusText = {
+      starting: 'Ativando microfone…',
+      listening: 'Ouvindo — fale com o Zeno',
+      transcribing: 'Transcrevendo…',
+      speaking: 'Zeno está respondendo…',
+      error: runtime?.error || 'Falha no modo voz.',
+    }[status] || status;
+    const lines = (runtime?.lines || []).slice(-6);
+    return `<div class="zeno-voice-layer" data-voice-layer>
+      <div class="zeno-voice-panel">
+        <div class="zeno-voice-status">${status === 'listening' ? '<span class="zeno-voice-live-dot" aria-hidden="true"></span>' : status === 'speaking' || status === 'transcribing' || status === 'starting' ? '<span class="oc-spinner" aria-hidden="true"></span>' : ''}<span data-voice-status>${esc(statusText)}</span></div>
+        <div class="zeno-voice-meter" aria-hidden="true"><div data-voice-meter></div></div>
+        <div class="zeno-voice-transcript" data-voice-transcript>${lines.length ? lines.map((line) => line.who === 'you' ? `<div><strong>Você:</strong> ${esc(line.text)}</div>` : line.who === 'zeno' ? `<div><strong>Zeno:</strong> ${esc(line.text)}</div>` : `<div>${esc(line.text)}</div>`).join('') : '<span>Diga alguma coisa…</span>'}</div>
+        <div class="zeno-voice-actions">
+          <button type="button" data-action="voice-exit" class="zeno-voice-end">${icon('oc-stop', 'remixicon h-4 w-4')}<span>Encerrar conversa</span></button>
+        </div>
+        <div class="zeno-voice-lang">Deepgram · ${esc(state.voiceLang)} · comando /idioma troca o idioma</div>
+      </div>
+    </div>`;
+  };
+
+  const renderVoice = () => {
+    const rootEl = $('[data-voice-root]');
+    if (!rootEl) return;
+    rootEl.innerHTML = tplVoiceOverlay();
+    $('[data-action="voice-exit"]', rootEl)?.addEventListener('click', () => setVoiceMode(false));
+  };
+
+  const voicePushLine = (runtime, who, text) => {
+    if (!runtime || runtime.stopped) return;
+    runtime.lines = [...(runtime.lines || []), { who, text }].slice(-20);
+    renderVoice();
+  };
+
+  const voiceSetStatus = (runtime, status, error) => {
+    if (!runtime || runtime.stopped) return;
+    runtime.status = status;
+    if (error) runtime.error = error;
+    renderVoice();
+  };
+
+  const setVoiceMode = (on) => {
+    if (on && state.voiceMode && voiceRuntime) return;
+    if (!on && !state.voiceMode) return;
+    state.voiceMode = on;
+    document.body.classList.toggle('zeno-voice-active', on);
+    if (on) void startVoiceLoop();
+    else stopVoiceLoop();
+    render();
+  };
+
+  const stopVoiceLoop = () => {
+    const runtime = voiceRuntime;
+    voiceRuntime = null;
+    if (!runtime) { blackHoleSend({ type: 'voice-off' }); return; }
+    runtime.stopped = true;
+    try { if (runtime.raf) cancelAnimationFrame(runtime.raf); } catch {}
+    try { if (runtime.recorder?.state && runtime.recorder.state !== 'inactive') runtime.recorder.stop(); } catch {}
+    try { runtime.stream?.getTracks?.().forEach((track) => track.stop()); } catch {}
+    try { runtime.ctx?.close?.(); } catch {}
+    try { window.speechSynthesis?.cancel?.(); } catch {}
+    blackHoleSend({ type: 'voice-off' });
+  };
+
+  const voiceMeterLoop = (runtime) => {
+    if (!runtime || runtime.stopped) return;
+    try {
+      runtime.analyser.getByteTimeDomainData(runtime.data);
+      let sum = 0;
+      for (let i = 0; i < runtime.data.length; i++) {
+        const v = (runtime.data[i] - 128) / 128;
+        sum += v * v;
+      }
+      const level = Math.min(1, Math.sqrt(sum / runtime.data.length) * 3.2);
+      blackHoleSend({ type: 'voice', level: Number(level.toFixed(3)) });
+      const meter = document.querySelector('[data-voice-meter]');
+      if (meter) meter.style.width = `${Math.round(level * 100)}%`;
+    } catch {}
+    runtime.raf = requestAnimationFrame(() => voiceMeterLoop(runtime));
+  };
+
+  const transcribeVoiceChunk = async (runtime, blob) => {
+    if (!runtime || runtime.stopped || runtime.transcribing || runtime.speaking) return;
+    runtime.transcribing = true;
+    try {
+      const text = (await transcribeAudio(blob, state.voiceLang) || '').trim();
+      if (text && !runtime.stopped) {
+        voicePushLine(runtime, 'you', text);
+        deliverUserText(text);
+      }
+    } catch (error) {
+      const message = error?.message || '';
+      if (!/reconhecida|áudio foi capturado|Nenhum áudio/i.test(message) && !runtime.stopped) {
+        voicePushLine(runtime, 'sys', message || 'Falha na transcrição.');
+      }
+    } finally {
+      runtime.transcribing = false;
+    }
+  };
+
+  const withVoiceTimeout = (promise, ms, message) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+
+  const startVoiceLoop = async () => {
+    stopVoiceLoop();
+    const runtime = { status: 'starting', lines: [], transcribing: false, speaking: false, stopped: false };
+    voiceRuntime = runtime;
+    renderVoice();
+    try {
+      const stream = await withVoiceTimeout(requestMicrophone(), 20000, 'Tempo esgotado ao acessar o microfone. Verifique a permissão do navegador.');
+      if (runtime.stopped) { stream.getTracks().forEach((track) => track.stop()); return; }
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) throw new Error('Áudio indisponível neste navegador.');
+      const ctx = new AudioCtx();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'].find((type) => !window.MediaRecorder?.isTypeSupported || window.MediaRecorder.isTypeSupported(type));
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      Object.assign(runtime, { stream, ctx, analyser, data: new Uint8Array(analyser.fftSize), recorder, mimeType });
+      recorder.addEventListener('dataavailable', (event) => {
+        if (event.data?.size) void transcribeVoiceChunk(runtime, event.data);
+      });
+      recorder.addEventListener('error', () => voiceSetStatus(runtime, 'error', 'Falha ao capturar o áudio.'));
+      recorder.start(4000);
+      voiceSetStatus(runtime, 'listening');
+      voiceMeterLoop(runtime);
+    } catch (error) {
+      voiceSetStatus(runtime, 'error', error?.message || 'Microfone indisponível.');
+    }
+  };
+
+  const voiceSpeak = (runtime, text) => new Promise((resolve) => {
+    const done = () => {
+      if (runtime) {
+        runtime.speaking = false;
+        try { runtime.recorder?.resume?.(); } catch {}
+        if (!runtime.stopped) voiceSetStatus(runtime, 'listening');
+      }
+      resolve();
+    };
+    try {
+      const synth = window.speechSynthesis;
+      const clean = String(text || '').replace(/[*_`#>\-[\]()]/g, '').trim().slice(0, 500);
+      if (!synth || !clean) return done();
+      if (runtime) {
+        runtime.speaking = true;
+        try { runtime.recorder?.pause?.(); } catch {}
+        voiceSetStatus(runtime, 'speaking');
+      }
+      synth.cancel();
+      const utterance = new SpeechSynthesisUtterance(clean);
+      utterance.lang = state.voiceLang;
+      try {
+        const voices = synth.getVoices?.() || [];
+        const match = voices.find((v) => v.lang === state.voiceLang) || voices.find((v) => (v.lang || '').startsWith((state.voiceLang || '').slice(0, 2)));
+        if (match) utterance.voice = match;
+      } catch {}
+      let finished = false;
+      const finish = () => { if (!finished) { finished = true; clearTimeout(safety); done(); } };
+      const safety = setTimeout(finish, 30000);
+      utterance.onend = finish;
+      utterance.onerror = finish;
+      synth.speak(utterance);
+    } catch { done(); }
+  });
+
   const bindComposer = (rootEl) => {
     const form = $('[data-composer-form]', rootEl);
     if (!form) return;
     const input = $('[data-composer-input]', form);
     if (!input) return;
-    const variantTrigger = $('[data-menu="variant"]', form);
-    variantTrigger?.addEventListener('click', openVariantDialog);
-    variantTrigger?.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openVariantDialog(); }
+    /* ---------- slash command menu (/, /model, /thinking, /voz, /idioma, /novo) ---------- */
+    let slash = null; // { key, mode, items, index }
+    const closeSlash = () => { slash = null; $('[data-slash-menu]', form)?.remove(); };
+    const setInputText = (value) => {
+      input.innerText = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+    };
+    const clearInput = () => setInputText('');
+    const slashCompute = (text) => {
+      if (!text.startsWith('/')) return null;
+      const sub = text.match(/^\/(model|thinking|m|t)(?:\s+(.*))?$/s);
+      if (sub) {
+        const kind = sub[1] === 'm' ? 'model' : sub[1] === 't' ? 'thinking' : sub[1];
+        const q = (sub[2] || '').trim().toLowerCase();
+        if (kind === 'model') {
+          return { mode: 'model', items: MODELS.filter((name) => name.toLowerCase().includes(q)).map((name) => ({ kind: 'model-opt', id: name, title: name, desc: name === state.model ? 'Em uso' : 'Trocar para este modelo', icon: 'oc-robot' })) };
+        }
+        return { mode: 'thinking', items: DESIGN_OPTIONS.filter(([name]) => name.toLowerCase().includes(q)).map(([name, description]) => ({ kind: 'thinking-opt', id: name, title: name, desc: description, icon: 'oc-brain-ai-3' })) };
+      }
+      const q = text.slice(1).trim().toLowerCase();
+      const all = [
+        { kind: 'goto-model', id: 'model', title: 'Modelo', desc: `Atual: ${state.model}`, icon: 'oc-robot' },
+        { kind: 'goto-thinking', id: 'thinking', title: 'Thinking', desc: `Atual: ${state.design}`, icon: 'oc-brain-ai-3' },
+        { kind: 'voice', id: 'voz', title: 'Conversar por voz', desc: `Deepgram · ${state.voiceLang}`, icon: 'oc-pulse' },
+        { kind: 'lang', id: 'idioma', title: 'Idioma da voz', desc: `Atual: ${state.voiceLang} · alterna ${SLASH_LANGS.join(', ')}`, icon: 'oc-global' },
+        { kind: 'new', id: 'novo', title: 'Novo chat', desc: 'Começar uma conversa em branco', icon: 'oc-chat-new' },
+      ];
+      return { mode: 'root', items: q ? all.filter((item) => `${item.id} ${item.title}`.toLowerCase().includes(q)) : all };
+    };
+    const paintSlashSelection = () => {
+      if (!slash) return;
+      $$('[data-slash-item]', form).forEach((b) => {
+        const selected = Number(b.dataset.slashItem) === slash.index;
+        b.classList.toggle('is-selected', selected);
+        b.setAttribute('aria-selected', String(selected));
+      });
+    };
+    const paintSlash = () => {
+      const text = getComposerText(input);
+      const computed = slashCompute(text);
+      if (!computed || !computed.items.length) { closeSlash(); return; }
+      const key = `${computed.mode}|${text}`;
+      if (!slash || slash.key !== key) slash = { key, mode: computed.mode, items: computed.items, index: 0 };
+      else slash.items = computed.items;
+      slash.index = Math.min(Math.max(0, slash.index), slash.items.length - 1);
+      $('[data-slash-menu]', form)?.remove();
+      const menu = document.createElement('div');
+      menu.dataset.slashMenu = 'true';
+      menu.innerHTML = `<div class="zeno-slash-list" role="listbox" aria-label="Comandos">${slash.items.map((item, i) => `
+        <button type="button" role="option" aria-selected="${i === slash.index}" data-slash-item="${i}" class="zeno-slash-item ${i === slash.index ? 'is-selected' : ''}">
+          ${icon(item.icon, 'remixicon h-4 w-4')}
+          <span class="min-w-0"><strong>${esc(item.title)}</strong><small>${esc(item.desc)}</small></span>
+        </button>`).join('')}</div>`;
+      form.appendChild(menu);
+      $$('[data-slash-item]', menu).forEach((b) => {
+        b.addEventListener('mousedown', (event) => { event.preventDefault(); applySlashItem(slash.items[Number(b.dataset.slashItem)]); });
+        b.addEventListener('mousemove', () => {
+          const i = Number(b.dataset.slashItem);
+          if (slash && slash.index !== i) { slash.index = i; paintSlashSelection(); }
+        });
+      });
+    };
+    const applySlashItem = (item) => {
+      if (!item) return;
+      if (item.kind === 'goto-model') { setInputText('/model '); return; }
+      if (item.kind === 'goto-thinking') { setInputText('/thinking '); return; }
+      if (item.kind === 'model-opt') { setModel(item.id); closeSlash(); clearInput(); flashComposerHint(form, `Modelo: ${item.id}`); return; }
+      if (item.kind === 'thinking-opt') { setDesign(item.id); closeSlash(); clearInput(); flashComposerHint(form, `Thinking: ${item.id}`); return; }
+      if (item.kind === 'voice') { closeSlash(); clearInput(); setVoiceMode(true); return; }
+      if (item.kind === 'lang') {
+        state.voiceLang = SLASH_LANGS[(SLASH_LANGS.indexOf(state.voiceLang) + 1) % SLASH_LANGS.length];
+        LS.set('oc-clone-voice-lang', state.voiceLang);
+        closeSlash(); clearInput(); flashComposerHint(form, `Idioma da voz: ${state.voiceLang}`);
+        return;
+      }
+      if (item.kind === 'new') {
+        closeSlash(); clearInput();
+        state.workspace = 'chat'; state.noteId = null; state.panel = null; state.draftNew = true;
+        persistWorkspace(); render();
+      }
+    };
+    const applySlashText = (text) => {
+      const sub = text.match(/^\/(model|thinking|m|t|voz|voice|idioma|lang|novo|new)\s*(.*)$/si);
+      if (!sub) return false;
+      const raw = sub[1].toLowerCase();
+      const arg = (sub[2] || '').trim();
+      const kind = raw === 'm' ? 'model' : raw === 't' ? 'thinking' : raw === 'voice' ? 'voz' : raw === 'lang' ? 'idioma' : raw === 'new' ? 'novo' : raw;
+      if (kind === 'model' || kind === 'thinking') {
+        const pool = kind === 'model' ? MODELS : DESIGN_OPTIONS.map(([name]) => name);
+        const found = pool.find((name) => name.toLowerCase() === arg.toLowerCase()) || (arg ? pool.find((name) => name.toLowerCase().includes(arg.toLowerCase())) : null);
+        if (found) {
+          if (kind === 'model') setModel(found); else setDesign(found);
+          closeSlash(); clearInput(); flashComposerHint(form, `${kind === 'model' ? 'Modelo' : 'Thinking'}: ${found}`);
+          return true;
+        }
+        if (!arg) { setInputText(kind === 'model' ? '/model ' : '/thinking '); return true; }
+        return false;
+      }
+      if (kind === 'voz') { closeSlash(); clearInput(); setVoiceMode(true); return true; }
+      if (kind === 'idioma') {
+        if (arg) {
+          const found = SLASH_LANGS.find((l) => l.toLowerCase() === arg.toLowerCase());
+          if (!found) return false;
+          state.voiceLang = found;
+        } else {
+          state.voiceLang = SLASH_LANGS[(SLASH_LANGS.indexOf(state.voiceLang) + 1) % SLASH_LANGS.length];
+        }
+        LS.set('oc-clone-voice-lang', state.voiceLang);
+        closeSlash(); clearInput(); flashComposerHint(form, `Idioma da voz: ${state.voiceLang}`);
+        return true;
+      }
+      if (kind === 'novo') {
+        closeSlash(); clearInput();
+        state.workspace = 'chat'; state.noteId = null; state.panel = null; state.draftNew = true;
+        persistWorkspace(); render();
+        return true;
+      }
+      return false;
+    };
+    $('[data-action="attach"]', form)?.addEventListener('click', () => {
+      const picker = document.createElement('input');
+      picker.type = 'file';
+      picker.multiple = true;
+      picker.style.display = 'none';
+      picker.addEventListener('change', () => {
+        const names = [...(picker.files || [])].map((f) => f.name).filter(Boolean);
+        if (names.length) {
+          const previous = getComposerText(input);
+          setInputText(`${previous ? `${previous} ` : ''}${names.map((n) => `[anexo: ${n}]`).join(' ')}`);
+        }
+        picker.remove();
+      });
+      document.body.appendChild(picker);
+      picker.click();
     });
+    $('[data-action="voice-mode"]', form)?.addEventListener('click', () => setVoiceMode(true));
     const send = $('[data-action="send"]', form);
     const syncSend = () => {
       const has = getComposerText(input).length > 0;
@@ -2108,29 +2587,26 @@
       syncSend();
       const scroller = input.closest('.cm-scroller');
       if (scroller) { scroller.style.maxHeight = '180px'; scroller.style.overflowY = input.scrollHeight > 180 ? 'auto' : 'hidden'; }
+      paintSlash();
     });
     input.addEventListener('keydown', (e) => {
+      if (slash?.items?.length) {
+        if (e.key === 'ArrowDown') { e.preventDefault(); slash.index = (slash.index + 1) % slash.items.length; paintSlashSelection(); return; }
+        if (e.key === 'ArrowUp') { e.preventDefault(); slash.index = (slash.index - 1 + slash.items.length) % slash.items.length; paintSlashSelection(); return; }
+        if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); applySlashItem(slash.items[slash.index]); return; }
+        if (e.key === 'Escape') { e.preventDefault(); closeSlash(); return; }
+      } else if (e.key === 'Escape' && slash) { e.preventDefault(); closeSlash(); return; }
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
     });
     const submit = () => {
       const text = getComposerText(input);
       if (!text || state.typing) return;
-      const s = activeSession();
-      s.messages.push({ id: 'msg_' + uid(), role: 'user', text, time: fmtTime(now()) });
-      state.liveTrace = [{ id: 'live_thinking', type: 'thinking', label: 'Thinking', icon: 'oc-brain-ai-3', text: 'Processando a solicitação…', meta: 'live' }];
-      state.typing = true;
-      render(true);
-      // thinking phase
-      setTimeout(() => {
-        // tool phase: add tool with typing animation
-        const reply = mockReply(text);
-        reply.id = 'msg_' + uid();
-        s.messages.push(reply);
-        state.liveTrace = null;
-        state.typing = false;
-        LS.set('oc-clone-sessions', state.sessions);
-        render(true);
-      }, 2200 + Math.random() * 800);
+      if (text.startsWith('/')) {
+        if (text === '/') return;
+        if (!applySlashText(text)) flashComposerHint(form, 'Comando desconhecido — digite / para ver as opções');
+        return;
+      }
+      deliverUserText(text);
     };
     form.addEventListener('submit', (e) => { e.preventDefault(); submit(); });
     syncSend();
@@ -2187,17 +2663,27 @@
     bindDictation(rootEl);
   };
 
+  const refreshSettingsContent = (rootEl) => {
+    const content = $('[data-settings-content]', rootEl);
+    if (content) content.innerHTML = tplSettingsSection();
+    $$('[data-settings-section]', rootEl).forEach((x) => {
+      x.classList.toggle('bg-interactive-hover', x.dataset.settingsSection === state.settingsSection);
+    });
+    rootEl.dataset.sig = state.settings ? [state.settingsSection, state.colorMode, state.lightTheme, state.darkTheme].join('|') : '';
+  };
+
   const bindSettings = (rootEl) => {
     $('[data-action="close-settings"]', rootEl)?.addEventListener('click', () => { state.settings = false; render(); });
     rootEl.addEventListener('mousedown', (e) => { if (e.target === rootEl) { state.settings = false; render(); } });
     $$('[data-settings-section]', rootEl).forEach((b) => b.addEventListener('click', () => {
       state.settingsSection = b.dataset.settingsSection;
-      render();
+      refreshSettingsContent(rootEl);
     }));
     $$('[data-radio]', rootEl).forEach((b) => b.addEventListener('click', () => {
       state.colorMode = b.dataset.radio.toLowerCase();
       LS.set('oc-clone-color-mode', state.colorMode);
-      render();
+      applyTheme();
+      refreshSettingsContent(rootEl);
     }));
     $$('[data-select-menu]', rootEl).forEach((b) => b.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2222,7 +2708,8 @@
         if (key === 'light-theme') { state.lightTheme = val; LS.set('oc-clone-light-theme', val); }
         if (key === 'dark-theme') { state.darkTheme = val; LS.set('oc-clone-dark-theme', val); }
         el.remove();
-        render();
+        applyTheme();
+        refreshSettingsContent(rootEl);
       }));
     }));
     $('[data-action="reload-themes"]', rootEl)?.addEventListener('click', () => { applyTheme(); });
@@ -2252,7 +2739,7 @@
     const time = fmtTime(now());
     const dur = (1.2 + Math.random() * 6).toFixed(1) + 's';
     const base = {
-      role: 'assistant', time, model: 'DeepSeek V4 Pro', agent: 'build', duration: dur,
+      role: 'assistant', time, model: state.model, agent: 'build', duration: dur,
       id: 'msg_' + uid(),
     };
     if (t.includes('array') || t.includes('foreach') || t.includes('map')) {
@@ -2309,6 +2796,7 @@
     });
     $$('[data-pal-session]', pal).forEach((b) => b.addEventListener('click', () => {
       state.activeId = b.dataset.palSession;
+      state.draftNew = false;
       LS.set('oc-clone-active', state.activeId);
       pal.remove();
       render();
@@ -2355,7 +2843,8 @@
       </div>
       <div data-settings-root></div>
       <div data-action-modal-root></div>
-      <div data-variant-root></div>`;
+      <div data-variant-root></div>
+      <div data-voice-root></div>`;
 
     bindGlobal();
     const sb = $('[data-sidebar-root]');
@@ -2398,11 +2887,12 @@
         state.workspace = 'chat';
         state.noteId = null;
         state.panel = null;
-        createSession(state.activeProjectId || null);
+        state.draftNew = true;
         persistWorkspace();
         render();
       }
       if (e.key === 'Escape') {
+        if (state.voiceMode) { setVoiceMode(false); return; }
         closeMenus();
         const variantRoot = $('[data-variant-root]');
         if (variantRoot?.firstElementChild) variantRoot.innerHTML = '';

@@ -272,7 +272,7 @@
   const icon = (name, cls = 'remixicon h-[18px] w-[18px]') =>
     `<svg class="${cls}" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><use href="#${name}"></use></svg>`;
 
-  const activeSession = () => state.sessions.find((s) => s.id === state.activeId) || state.sessions[0];
+  const activeSession = () => state.draftNew ? null : (state.sessions.find((s) => s.id === state.activeId) || state.sessions[0]);
   const activeProject = () => state.projects.find((project) => project.id === state.activeProjectId) || null;
   const projectSessions = (projectId) => state.sessions.filter((session) => session.projectId === projectId);
   const persistWorkspace = () => {
@@ -289,6 +289,7 @@
     };
     state.sessions.unshift(session);
     state.activeId = session.id;
+    state.draftNew = false;
     LS.set('oc-clone-sessions', state.sessions);
     return session;
   };
@@ -299,6 +300,7 @@
     state.workspace = 'chat';
     const session = projectSessions(project.id)[0] || createSession(project.id);
     state.activeId = session.id;
+    state.draftNew = false;
     state.noteId = null;
     state.panel = null;
     persistWorkspace();
@@ -542,7 +544,7 @@
 
   const tplSidebarHeader = () => `
     <div class="zeno-sidebar-header select-none flex-shrink-0">
-      <button type="button" data-action="new-session" class="zeno-new-chat-button">
+      <button type="button" data-action="new-session" class="zeno-new-chat-button ${state.workspace === 'chat' && state.draftNew ? 'is-active' : ''}">
         <span class="zeno-sidebar-nav-icon">${icon('oc-chat-new', 'remixicon h-4 w-4')}</span>
         <span class="truncate">New chat</span>
         <kbd>Ctrl N</kbd>
@@ -561,7 +563,7 @@
       </div>
     </div>`;
 
-  const tplSessionRow = (s, indent = 26) => {
+  const tplSessionRow = (s, indent = 29) => {
     const active = s.id === state.activeId;
     return `
       <div role="button" tabindex="0" data-session-id="${s.id}">
@@ -600,7 +602,7 @@
   const tplSidebar = () => `
     <aside class="relative flex h-full overflow-hidden border-r will-change-[width] motion-reduce:transition-none bg-sidebar oc-vibrancy-surface shadow-[inset_-2px_0_10px_-2px_rgb(0_0_0_/_0.06)] border-border" aria-hidden="${!state.sidebarOpen}" style="width: ${state.sidebarOpen ? state.sidebarW : 0}px; min-width: ${state.sidebarOpen ? state.sidebarW : 0}px; max-width: ${state.sidebarOpen ? state.sidebarW : 0}px; --oc-left-sidebar-width: ${state.sidebarOpen ? state.sidebarW : 0}px; overflow-x: clip; transition-property: width, min-width, max-width; transition-duration: 200ms; transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);">
       <div class="absolute right-0 top-0 z-20 h-full w-[3px] cursor-col-resize hover:bg-[var(--interactive-border)]/80 transition-colors" role="separator" aria-orientation="vertical" aria-label="Resize left panel" data-action="resize-sidebar"></div>
-      <div class="relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none" aria-hidden="false" style="width: ${state.sidebarOpen ? state.sidebarW : 0}px; overflow-x: hidden;">
+      <div class="relative z-10 flex h-full shrink-0 flex-col motion-reduce:transition-none" aria-hidden="false" style="width: ${state.sidebarOpen ? state.sidebarW : 0}px; overflow-x: hidden; transition-property: width, min-width, max-width, opacity; transition-duration: 200ms; transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);">
         <div aria-hidden="true" class="flex shrink-0" style="height: var(--oc-header-height, 3rem);"></div>
         <div class="min-h-0 flex-1 overflow-y-auto">
           <div class="relative flex h-full flex-col text-foreground overflow-x-hidden bg-transparent">
@@ -618,7 +620,7 @@
                         </button>
                       </div>
                       <div class="space-y-0.5">
-                        ${state.sessions.map(tplSessionRow).join('')}
+                        ${state.sessions.map((s) => tplSessionRow(s)).join('')}
                         <button type="button" class="mt-0.5 flex items-center justify-start rounded-md pl-[26px] pr-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline">Show more sessions</button>
                       </div>
                     </div>
@@ -845,13 +847,13 @@
   const tplMemoryNode = (note) => {
     const x = note.x * 16, y = note.y * 9, size = note.root ? 26 : 18;
     return `<g data-memory-note="${esc(note.id)}" class="memory-node ${note.root ? 'memory-node-root' : ''}" transform="translate(${x} ${y})" tabindex="0" role="button" aria-label="Open ${esc(note.title)}">
-      <rect x="${-size / 2}" y="${-size / 2}" width="${size}" height="${size}" rx="${note.root ? 6 : 4}" class="memory-node-shape"></rect>
+      <circle cx="0" cy="0" r="${size / 2}" class="memory-node-shape"></circle>
       <text y="${size / 2 + 20}" text-anchor="middle" class="memory-node-label">${esc(note.title)}</text>
       <g class="memory-node-actions" transform="translate(-48 ${-size / 2 - 64})">
         <rect width="96" height="66" rx="10" class="memory-node-actions-bg"></rect>
-        <g data-memory-action="edit" transform="translate(48 11)"><text text-anchor="middle" dominant-baseline="central">Editar</text><title>Editar</title></g>
-        <g data-memory-action="view" transform="translate(48 33)"><text text-anchor="middle" dominant-baseline="central">Visualizar</text><title>Visualizar</title></g>
-        <g data-memory-action="delete" transform="translate(48 55)"><text text-anchor="middle" dominant-baseline="central">Delete</text><title>Delete</title></g>
+        <g data-memory-action="edit" transform="translate(48 11)"><use href="#oc-edit" x="-7" y="-7" width="14" height="14"></use><title>Editar</title></g>
+        <g data-memory-action="view" transform="translate(48 33)"><use href="#oc-eye" x="-7" y="-7" width="14" height="14"></use><title>Visualizar</title></g>
+        <g data-memory-action="delete" transform="translate(48 55)"><use href="#oc-delete-bin" x="-7" y="-7" width="14" height="14"></use><title>Delete</title></g>
       </g>
     </g>`;
   };
@@ -1120,21 +1122,12 @@
 
   /* ---------- templates: settings ---------- */
   const SETTINGS_GROUPS = [
-    ['', [
-      ['General', 'oc-settings-3'], ['Appearance', 'oc-palette'], ['Chat', 'oc-chat-ai-3'], ['Notifications', 'oc-notification-3'],
-      ['Sessions', 'oc-chat-history'], ['Shortcuts', 'oc-command'], ['Voice', 'oc-mic'], ['Usage', 'oc-bar-chart-2'],
+    ['General', [
+      ['Appearance', 'oc-palette'], ['Chat', 'oc-chat-ai-3'], ['Notifications', 'oc-notification-3'],
+      ['Shortcuts', 'oc-command'], ['Voice', 'oc-mic'], ['Usage', 'oc-bar-chart-2'],
     ]],
     ['Workspace', [
-      ['Projects', 'oc-folder'], ['Remote Instances', 'oc-server'], ['External', 'oc-link-unlink-m'], ['Tunnel beta', 'oc-route'], ['Git', 'oc-git-branch'],
-    ]],
-    ['OpenCode', [
-      ['Providers', 'oc-database-2'], ['Agents', 'oc-ai-agent'], ['Behavior', 'oc-equalizer-2'],
-    ]],
-    ['Commands', [
-      ['MCP', 'oc-plug-2'], ['Plugins', 'oc-puzzle-2'],
-    ]],
-    ['Library', [
-      ['Magic Prompts', 'oc-ai-generate-2'], ['Snippets', 'oc-chat-thread'],
+      ['Projects', 'oc-folder'], ['Remote Instances', 'oc-server'], ['Plugins', 'oc-puzzle-2'],
     ]],
   ];
 
@@ -1251,19 +1244,16 @@
   };
 
   const tplSettings = () => `
-    <div class="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 oc-backdrop" data-settings-backdrop>
-      <div role="dialog" aria-label="OpenChamber settings window." data-open="" class="oc-dialog relative pointer-events-auto w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px] rounded-xl border shadow-none overflow-hidden origin-center bg-background transition-all duration-150 ease-out" style="--nested-dialogs: 0; height: min(85vh, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); max-width: min(1200px, calc(100vw - 24px));">
+    <div class="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 oc-backdrop" data-settings-backdrop style="background-color: rgb(0 0 0 / 0.8)">
+      <div role="dialog" aria-label="OpenChamber settings window." data-open="" class="oc-dialog relative pointer-events-auto w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px] rounded-xl border shadow-none overflow-hidden origin-center bg-background transition-all duration-150 ease-out" style="--nested-dialogs: 0; height: min(85vh, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); max-width: min(805px, calc(100vw - 24px));">
         <div class="absolute right-0.5 z-50 top-0.5">
           <button type="button" aria-label="Close settings" title="Close Settings (Ctrl+,)" data-action="close-settings" class="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">${icon('oc-close', 'remixicon h-5 w-5')}</button>
         </div>
         <div class="relative flex h-full min-h-0 flex-col overflow-hidden bg-background">
           <div class="flex flex-1 min-h-0 overflow-hidden">
             <div class="relative flex h-full min-h-0 flex-col overflow-hidden border-r bg-sidebar" style="width: 256px; min-width: 256px; border-color: var(--interactive-border);">
-              <div class="flex h-full flex-col overflow-hidden">
-                <div class="px-4 pt-3">
-                  <div class="flex h-10 items-center gap-1.5 rounded-md border border-border bg-background/70 px-2 text-muted-foreground focus-within:ring-2 focus-within:ring-primary/40 sm:h-8">${icon('oc-search', 'remixicon h-4 w-4 shrink-0')}<input placeholder="Search settings" aria-label="Search settings" class="typography-ui min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground/70"></div>
-                </div>
-                <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+                  <div class="flex h-full flex-col overflow-hidden">
+                    <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
                   <div class="flex flex-col gap-0.5 px-4 pt-4 pb-2">
                     ${SETTINGS_GROUPS.map(([group, items]) => `
                     <div class="space-y-0.5">
@@ -1358,7 +1348,14 @@
     const panel = $('[data-panel-root]');
     if (panel) { panel.innerHTML = tplPanel(); bindPanel(panel); }
     const settings = $('[data-settings-root]');
-    if (settings) { settings.innerHTML = state.settings ? tplSettings() : ''; if (state.settings) bindSettings(settings); }
+    if (settings) {
+      const sig = state.settings ? [state.settingsSection, state.colorMode, state.lightTheme, state.darkTheme].join('|') : '';
+      if (settings.dataset.sig !== sig) {
+        settings.innerHTML = state.settings ? tplSettings() : '';
+        settings.dataset.sig = sig;
+        if (state.settings) bindSettings(settings);
+      }
+    }
     const actionModal = $('[data-action-modal-root]');
     if (actionModal) { actionModal.innerHTML = tplActionModal(); if (state.modal) bindActionModal(actionModal); }
     const chat2 = $('#chat-root');
@@ -1398,7 +1395,7 @@
   };
 
   const createMemoryNoteAt = (x, y) => {
-    const note = { id: 'memory_' + uid(), title: 'Untitled note', tag: 'Note', excerpt: '', content: '# Untitled note\n\nStart writing here.', accent: '#fff', x, y, updated: 'agora' };
+    const note = { id: 'memory_' + uid(), title: 'Untitled note', tag: 'Note', excerpt: '', content: '# Untitled note\n\nStart writing here.', accent: '#fff', x, y, updated: 'agora', by: 'User' };
     state.memoryNotes.push(note);
     openMemoryEditor(note, true);
   };
@@ -1444,6 +1441,7 @@
           event.stopPropagation();
           suppressNoteOpenUntil = Date.now() + 450;
           connectingFrom = targetNode;
+          state.memoryLinkPending = true;
           const matrix = targetNode.transform.baseVal.getItem(0).matrix;
           connectionLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
           connectionLine.setAttribute('class', 'memory-edge memory-edge-preview');
@@ -1541,6 +1539,7 @@
       viewport.addEventListener('contextmenu', (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (state.memoryLinkPending) { state.memoryLinkPending = false; return; }
         if (event.target.closest('[data-memory-note]')) {
           suppressNoteOpenUntil = Date.now() + 450;
           return;
@@ -1615,7 +1614,7 @@
       state.workspace = 'chat';
       state.noteId = null;
       state.panel = null;
-      createSession(project.id);
+      state.draftNew = true;
       persistWorkspace();
       render();
     }));
@@ -1660,6 +1659,7 @@
         const session = state.sessions.find((item) => item.id === state.activeId);
         state.activeProjectId = session?.projectId || null;
         state.workspace = 'chat';
+        state.draftNew = false;
         state.noteId = null;
         LS.set('oc-clone-active', state.activeId);
         persistWorkspace();
@@ -1670,7 +1670,7 @@
       state.workspace = 'chat';
       state.noteId = null;
       state.panel = null;
-      createSession(state.activeProjectId || null);
+      state.draftNew = true;
       persistWorkspace();
       render();
     });
@@ -1805,6 +1805,7 @@
       const session = state.sessions.find((item) => item.id === state.activeId);
       state.activeProjectId = session?.projectId || null;
       state.workspace = 'chat';
+      state.draftNew = false;
       state.modal = null;
       LS.set('oc-clone-active', state.activeId);
       persistWorkspace();
@@ -2069,6 +2070,7 @@
     const submit = () => {
       const text = getComposerText(input);
       if (!text || state.typing) return;
+      if (state.draftNew) createSession(state.activeProjectId || null);
       const s = activeSession();
       s.messages.push({ id: 'msg_' + uid(), role: 'user', text, time: fmtTime(now()) });
       state.liveTrace = [{ id: 'live_thinking', type: 'thinking', label: 'Thinking', icon: 'oc-brain-ai-3', text: 'Processando a solicitaÃ§Ã£oâ€¦', meta: 'live' }];
@@ -2141,17 +2143,27 @@
     bindDictation(rootEl);
   };
 
+  const refreshSettingsContent = (rootEl) => {
+    const content = $('[data-settings-content]', rootEl);
+    if (content) content.innerHTML = tplSettingsSection();
+    $$('[data-settings-section]', rootEl).forEach((x) => {
+      x.classList.toggle('bg-interactive-hover', x.dataset.settingsSection === state.settingsSection);
+    });
+    rootEl.dataset.sig = state.settings ? [state.settingsSection, state.colorMode, state.lightTheme, state.darkTheme].join('|') : '';
+  };
+
   const bindSettings = (rootEl) => {
     $('[data-action="close-settings"]', rootEl)?.addEventListener('click', () => { state.settings = false; render(); });
     rootEl.addEventListener('mousedown', (e) => { if (e.target === rootEl) { state.settings = false; render(); } });
     $$('[data-settings-section]', rootEl).forEach((b) => b.addEventListener('click', () => {
       state.settingsSection = b.dataset.settingsSection;
-      render();
+      refreshSettingsContent(rootEl);
     }));
     $$('[data-radio]', rootEl).forEach((b) => b.addEventListener('click', () => {
       state.colorMode = b.dataset.radio.toLowerCase();
       LS.set('oc-clone-color-mode', state.colorMode);
-      render();
+      applyTheme();
+      refreshSettingsContent(rootEl);
     }));
     $$('[data-select-menu]', rootEl).forEach((b) => b.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2176,7 +2188,8 @@
         if (key === 'light-theme') { state.lightTheme = val; LS.set('oc-clone-light-theme', val); }
         if (key === 'dark-theme') { state.darkTheme = val; LS.set('oc-clone-dark-theme', val); }
         el.remove();
-        render();
+        applyTheme();
+        refreshSettingsContent(rootEl);
       }));
     }));
     $('[data-action="reload-themes"]', rootEl)?.addEventListener('click', () => { applyTheme(); });
@@ -2263,6 +2276,7 @@
     });
     $$('[data-pal-session]', pal).forEach((b) => b.addEventListener('click', () => {
       state.activeId = b.dataset.palSession;
+      state.draftNew = false;
       LS.set('oc-clone-active', state.activeId);
       pal.remove();
       render();
@@ -2348,7 +2362,7 @@
         state.workspace = 'chat';
         state.noteId = null;
         state.panel = null;
-        createSession(state.activeProjectId || null);
+        state.draftNew = true;
         persistWorkspace();
         render();
       }

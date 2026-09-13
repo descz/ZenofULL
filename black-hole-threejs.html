@@ -44,6 +44,10 @@
     let targetPhi = 1.36;
     let targetRadius = 20.5;
 
+    // Voice energy (0..1): set by the host page while talking to Zeno.
+    let voiceTarget = 0;
+    let voiceLevel = 0;
+
     let theta = targetTheta;
     let phi = targetPhi;
     let radius = targetRadius;
@@ -596,6 +600,11 @@
         targetPhi = THREE.MathUtils.clamp(targetPhi, 0.48, 2.66);
         userActiveUntil = performance.now() + 6000;
       }
+      if (data.type === 'voice') {
+        voiceTarget = THREE.MathUtils.clamp(Number(data.level) || 0, 0, 1);
+        userActiveUntil = performance.now() + 1500;
+      }
+      if (data.type === 'voice-off') voiceTarget = 0;
     });
 
     function resize() {
@@ -639,9 +648,17 @@
       innerMat.uniforms.uTime.value = t;
       postMat.uniforms.uTime.value = t;
 
-      plasma.rotation.y = t * 0.13;
-      dust.rotation.y = t * 0.0025;
-      stars.rotation.y = t * 0.0015;
+      voiceLevel += (voiceTarget - voiceLevel) * 0.07;
+      if (Math.abs(voiceTarget - voiceLevel) < 0.001) voiceLevel = voiceTarget;
+      const voiceBoost = 1 + voiceLevel * 3.0;
+
+      plasma.rotation.y = t * 0.13 * voiceBoost;
+      dust.rotation.y = t * 0.0025 * voiceBoost;
+      stars.rotation.y = t * 0.0015 * (1 + voiceLevel);
+      if (voiceLevel > 0.003) {
+        camera.position.multiplyScalar(1 - voiceLevel * 0.045);
+        camera.lookAt(focusOffset);
+      }
 
       renderer.setRenderTarget(renderTarget);
       renderer.clear();

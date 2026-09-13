@@ -451,10 +451,9 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
   text-align: left;
 }
 .zeno-new-chat-button {
+  position: relative;
   height: 38px;
   padding: 0 10px;
-  background: color-mix(in srgb, var(--primary) 9%, transparent);
-  border-color: color-mix(in srgb, var(--primary) 12%, transparent);
   font-size: 13px;
   font-weight: 560;
 }
@@ -498,8 +497,6 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
 }
 .zeno-sidebar-nav-item.is-active {
   color: var(--foreground);
-  background: color-mix(in srgb, var(--primary) 11%, transparent);
-  border-color: color-mix(in srgb, var(--primary) 13%, transparent);
 }
 .zeno-sidebar-nav-item.is-active::before {
   position: absolute;
@@ -941,9 +938,13 @@ body:has(.memory-view) [data-panel-root] {
 .memory-overlay-heading {
   position: absolute;
   z-index: 8;
-  top: 26px;
-  left: 30px;
+  top: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
   pointer-events: none;
+  background: #000;
+  padding: 20px 24px 22px;
   text-shadow: 0 2px 18px #000;
 }
 .memory-overlay-heading h1 {
@@ -1086,17 +1087,10 @@ body:has(.memory-view) [data-panel-root] {
 }
 .memory-edge {
   fill: none;
-  stroke: rgb(255 255 255 / .72);
+  stroke: #fff;
   stroke-width: 1.35;
   stroke-linecap: round;
   shape-rendering: geometricPrecision;
-  opacity: .48;
-  animation: memory-edge-in 900ms ease both;
-  animation-delay: var(--memory-edge-delay);
-}
-@keyframes memory-edge-in {
-  from { stroke-dashoffset: 18; opacity: 0; }
-  to { stroke-dashoffset: 0; opacity: .48; }
 }
 .memory-node {
   color: #fff;
@@ -1131,13 +1125,10 @@ body:has(.memory-view) [data-panel-root] {
 }
 .memory-node-actions [data-memory-action] {
   cursor: pointer;
+  color: rgb(255 255 255 / .72);
 }
-.memory-node-actions [data-memory-action] text {
-  fill: rgb(255 255 255 / .72);
-  font: 10px ui-monospace, monospace;
-}
-.memory-node-actions [data-memory-action]:hover text {
-  fill: #fff;
+.memory-node-actions [data-memory-action]:hover {
+  color: #fff;
 }
 .memory-edge-preview {
   opacity: .8;

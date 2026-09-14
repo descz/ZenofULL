@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.20)
+project(ZenoCPackageConsumer LANGUAGES C)
+find_package(ZenoC CONFIG REQUIRED)
+add_executable(zenoc_package_consumer main.c)
+target_link_libraries(zenoc_package_consumer PRIVATE ZenoC::zenoc)

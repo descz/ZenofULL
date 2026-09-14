@@ -1,0 +1,22 @@
+{
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "tokens_in": 10566,
+    "tokens_out": 480,
+    "duration_s": 108.0
+  },
+  "results": [
+    {
+      "task": "count-unique",
+      "verdict": "pass",
+      "detail": "expected={'GET /a': 2, 'GET /b': 1, 'POST /a': 2, 'DELETE /c': 1} got={'GET /a': 2, 'GET /b': 1, 'POST /a': 2, 'DELETE /c': 1}",
+      "rc": 0,
+      "duration_s": 108.0,
+      "tokens_in": 10566,
+      "tokens_out": 480,
+      "tokens_cached": 8896,
+      "stderr_tail": "ions.OrderedDict);print(d)\\\"\"}\n[auto-approve] run_command {\"command\":\"python3 -c \\\"import json;print(json.load(open('report.json')))\\\"\"}\n[auto-approve] run_command {\"command\":\"python3 -m json.tool report.json\"}\n[auto-approve] run_command {\"command\":\"node -e \\\"const d=require('./report.json');console.log(JSON.stringify(d))\\\"\"}\n[auto-approve] run_command {\"command\":\"py -m json.tool report.json\"}\nstatus=completed run_id=run_1788303639165_1 turns=9 tools=8 tokens_in=10566 tokens_out=480 cached=8896\n"
+    }
+  ]
+}

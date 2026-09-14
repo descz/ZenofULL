@@ -1,0 +1,53 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "offline-debug",
+      "displayName": "Offline Debug",
+      "description": "Portable core build without optional network adapters.",
+      "binaryDir": "${sourceDir}/build/preset-offline-debug",
+      "cacheVariables": {
+        "ZENO_ENABLE_CURL": "OFF",
+        "ZENO_BUILD_TESTS": "ON",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "curl-release",
+      "displayName": "Release with libcurl",
+      "description": "Release build; libcurl is used when discoverable by CMake.",
+      "binaryDir": "${sourceDir}/build/preset-curl-release",
+      "cacheVariables": {
+        "ZENO_ENABLE_CURL": "ON",
+        "ZENO_BUILD_TESTS": "ON",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "offline-debug",
+      "configurePreset": "offline-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "curl-release",
+      "configurePreset": "curl-release",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "offline-debug",
+      "configurePreset": "offline-debug",
+      "configuration": "Debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "curl-release",
+      "configurePreset": "curl-release",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"provider":"openai","base_url":"http://127.0.0.1:8123/v1","api_key":"mock-key","model":"mock-gpt","fallback_models":"","workspace":".","skills_dir":"skills","agent_mode":"full","models_updated_ms":1789413105591,"models":["mock-gpt","mock-reasoner"],"require_approval":false}

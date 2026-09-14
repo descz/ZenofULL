@@ -1,0 +1,34 @@
+[
+  {
+    "task": "jsonl-aggregator",
+    "verdict": "pass",
+    "agent_exit": 0,
+    "attempts": 1,
+    "seconds": 151.6,
+    "note": "from first run; 12 turns, 12 tools, tokens_in=25183 cached=19648"
+  },
+  {
+    "task": "analyze-access-logs",
+    "verdict": "pass",
+    "agent_exit": 0,
+    "attempts": 1,
+    "seconds": 88.1,
+    "note": "10 turns, 9 tools, tokens_in=113750 cached=100544; pytest 3 passed"
+  },
+  {
+    "task": "grid-pattern-transform",
+    "verdict": "fail",
+    "agent_exit": 0,
+    "attempts": 1,
+    "seconds": 58.6,
+    "note": "wrote transform.py; test imports grid_transform.py (name given in instruction)"
+  },
+  {
+    "task": "mahjong-winninghand",
+    "verdict": "fail",
+    "agent_exit": 0,
+    "attempts": 2,
+    "seconds": 128.9,
+    "note": "wrote solve.py and ran it; never produced result.txt (batch over 8 hands)"
+  }
+]

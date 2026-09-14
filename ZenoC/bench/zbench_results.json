@@ -1,0 +1,143 @@
+{
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "tokens_in": 126341,
+    "tokens_out": 5882,
+    "duration_s": 949.8
+  },
+  "results": [
+    {
+      "task": "file-create-exact",
+      "verdict": "pass",
+      "detail": "expected='ZENO=ready\\nlines=3\\nok=yes\\n' got='ZENO=ready\\nlines=3\\nok=yes\\n'",
+      "rc": 0,
+      "duration_s": 53.8,
+      "tokens_in": 6235,
+      "tokens_out": 254,
+      "tokens_cached": 4928,
+      "stderr_tail": "[auto-approve] run_command {\"command\":\"cat -A target.txt && wc -c target.txt\"}\n[auto-approve] run_command {\"command\":\"od -c target.txt\"}\nstatus=completed run_id=run_1788302733493_1 turns=6 tools=5 tokens_in=6235 tokens_out=254 cached=4928\n"
+    },
+    {
+      "task": "config-edit",
+      "verdict": "pass",
+      "detail": "expected='host=localhost\\nport=9090\\ndebug=false\\nretries=3\\n' got='host=localhost\\nport=9090\\ndebug=false\\nretries=3\\n'",
+      "rc": 0,
+      "duration_s": 96.3,
+      "tokens_in": 14226,
+      "tokens_out": 462,
+      "tokens_cached": 12544,
+      "stderr_tail": "d {\"command\":\"grep -n . config.ini\"}\n[auto-approve] run_command {\"command\":\"grep -cx 'port=9090' config.ini\"}\n[auto-approve] run_command {\"command\":\"grep -cx 'debug=false' config.ini\"}\n[auto-approve] run_command {\"command\":\"grep -cx 'host=localhost' config.ini\"}\n[auto-approve] run_command {\"command\":\"grep -cx 'retries=3' config.ini\"}\n[auto-approve] run_command {\"command\":\"wc -l config.ini\"}\nstatus=completed run_id=run_1788302789815_1 turns=12 tools=10 tokens_in=14226 tokens_out=462 cached=12544\n"
+    },
+    {
+      "task": "csv-total",
+      "verdict": "pass",
+      "detail": "expected='14.50\\n' got='14.50\\n'",
+      "rc": 0,
+      "duration_s": 84.4,
+      "tokens_in": 12251,
+      "tokens_out": 839,
+      "tokens_cached": 10496,
+      "stderr_tail": "h open('total.txt','w') as f:\\n    f.write('%.2f\\\\n'%t)\\nprint('%.2f'%t)\\n\\\"\"}\n[auto-approve] run_command {\"command\":\"python3 -c \\\"import csv; t=sum(float(r['qty'])*float(r['price']) for r in csv.DictReader(open('sales.csv'))); open('total.txt','w').write('%.2f\\\\n'%t); print(t)\\\"\"}\n[auto-approve] run_command {\"command\":\"cat total.txt\"}\n[auto-approve] run_command {\"command\":\"od -c total.txt\"}\nstatus=completed run_id=run_1788302884846_1 turns=10 tools=8 tokens_in=12251 tokens_out=839 cached=10496\n"
+    },
+    {
+      "task": "json-transform",
+      "verdict": "pass",
+      "detail": "expected={'adults': ['ana', 'carla'], 'average_age': 32.0} got={'adults': ['ana', 'carla'], 'average_age': 32.0}",
+      "rc": 0,
+      "duration_s": 47.2,
+      "tokens_in": 6935,
+      "tokens_out": 255,
+      "tokens_cached": 4352,
+      "stderr_tail": "[auto-approve] run_command {\"command\":\"python3 -c \\\"import json; d=json.load(open('people_out.json')); print(d)\\\"\"}\n[auto-approve] run_command {\"command\":\"python3 -m json.tool people_out.json\"}\n[auto-approve] run_command {\"command\":\"node -e \\\"console.log(JSON.stringify(require('./people_out.json')))\\\"\"}\nstatus=completed run_id=run_1788302969439_1 turns=6 tools=5 tokens_in=6935 tokens_out=255 cached=4352\n"
+    },
+    {
+      "task": "fix-python-bug",
+      "verdict": "pass",
+      "detail": "rc=0 out='10' err=''",
+      "rc": 0,
+      "duration_s": 37.4,
+      "tokens_in": 4130,
+      "tokens_out": 122,
+      "tokens_cached": 2880,
+      "stderr_tail": "[auto-approve] run_command {\"command\":\"python sum.py\"}\nstatus=completed run_id=run_1788303016780_1 turns=4 tools=3 tokens_in=4130 tokens_out=122 cached=2880\n"
+    },
+    {
+      "task": "regex-extract",
+      "verdict": "pass",
+      "detail": "expected='alice@example.com\\nbob.smith@mail.org\\ncarol99@sub.domain.io\\n' got='alice@example.com\\nbob.smith@mail.org\\ncarol99@sub.domain.io\\n'",
+      "rc": 0,
+      "duration_s": 123.2,
+      "tokens_in": 10990,
+      "tokens_out": 1199,
+      "tokens_cached": 9280,
+      "stderr_tail": "rove] run_command {\"command\":\"grep -Ec '@[^@]*\\\\.[^@]*' emails.txt\"}\n[auto-approve] run_command {\"command\":\"grep -c example emails.txt\"}\n[auto-approve] run_command {\"command\":\"grep -cE '^[a-z]' emails.txt\"}\n[auto-approve] run_command {\"command\":\"wc -l emails.txt\"}\n[auto-approve] run_command {\"command\":\"grep -n org emails.txt\"}\n[auto-approve] run_command {\"command\":\"grep -Fv fake emails.txt\"}\nstatus=completed run_id=run_1788303054904_1 turns=9 tools=11 tokens_in=10990 tokens_out=1199 cached=9280\n"
+    },
+    {
+      "task": "sort-lines",
+      "verdict": "pass",
+      "detail": "expected='alien\\napple\\nbanana\\ncherry\\n' got='alien\\napple\\nbanana\\ncherry\\n'",
+      "rc": 0,
+      "duration_s": 38.8,
+      "tokens_in": 4819,
+      "tokens_out": 175,
+      "tokens_cached": 2688,
+      "stderr_tail": "[auto-approve] run_command {\"command\":\"sort -c words.txt && echo OK\"}\n[auto-approve] run_command {\"command\":\"sort -c words.txt\"}\nstatus=completed run_id=run_1788303178215_1 turns=5 tools=4 tokens_in=4819 tokens_out=175 cached=2688\n"
+    },
+    {
+      "task": "multi-file-module",
+      "verdict": "pass",
+      "detail": "rc=0 out='56' err=''",
+      "rc": 1,
+      "duration_s": 165.8,
+      "tokens_in": 33752,
+      "tokens_out": 823,
+      "tokens_cached": 29632,
+      "stderr_tail": "o-approve] run_command {\"command\":\"py -3 -m app_test_runner\"}\n[auto-approve] run_command {\"command\":\"py -3 smoke_test.py\"}\n[auto-approve] run_command {\"command\":\"py -3 -c \\\"import app; print(repr(app.run(2, 3)))\\\"\"}\n[auto-approve] run_command {\"command\":\"py -3 debug_run.py\"}\n[auto-approve] run_command {\"command\":\"py -3 smoke_test.py\"}\n[auto-approve] run_command {\"command\":\"py -3 debug_run.py\"}\nstatus=failed run_id=run_1788303216948_1 turns=20 tools=21 tokens_in=33752 tokens_out=823 cached=29632\n"
+    },
+    {
+      "task": "count-unique",
+      "verdict": "pass",
+      "detail": "expected={'GET /a': 2, 'GET /b': 1, 'POST /a': 2, 'DELETE /c': 1} got={'GET /a': 2, 'GET /b': 1, 'POST /a': 2, 'DELETE /c': 1}",
+      "rc": 0,
+      "duration_s": 108.0,
+      "tokens_in": 10566,
+      "tokens_out": 480,
+      "tokens_cached": 8896,
+      "stderr_tail": "ions.OrderedDict);print(d)\\\"\"}\n[auto-approve] run_command {\"command\":\"python3 -c \\\"import json;print(json.load(open('report.json')))\\\"\"}\n[auto-approve] run_command {\"command\":\"python3 -m json.tool report.json\"}\n[auto-approve] run_command {\"command\":\"node -e \\\"const d=require('./report.json');console.log(JSON.stringify(d))\\\"\"}\n[auto-approve] run_command {\"command\":\"py -m json.tool report.json\"}\nstatus=completed run_id=run_1788303639165_1 turns=9 tools=8 tokens_in=10566 tokens_out=480 cached=8896\n"
+    },
+    {
+      "task": "edit-c-file",
+      "verdict": "pass",
+      "detail": "expected='#include <stdio.h>\\nint main(void) {\\n    for (int i = 1; i <= 5; i++)\\n        printf(\"%d \", i);\\n    return 0;\\n}\\n' got='#include <stdio.h>\\nint main(void) {\\n    for (int i = 1; i <= 5; i++)\\n        printf(\"%d \", i);\\n    return 0;\\n}\\n'",
+      "rc": 0,
+      "duration_s": 125.1,
+      "tokens_in": 15697,
+      "tokens_out": 1028,
+      "tokens_cached": 12416,
+      "stderr_tail": "ion\"}\n[auto-approve] run_command {\"command\":\"where gcc cc clang tcc cl clang-cl zig 2>nul\"}\n[auto-approve] run_command {\"command\":\"where gcc\"}\n[auto-approve] run_command {\"command\":\"where cl\"}\n[auto-approve] run_command {\"command\":\"where python\"}\n[auto-approve] run_command {\"command\":\"where node\"}\n[auto-approve] run_command {\"command\":\"python -c \\\"for i in range(1,6): print(i, end=' ')\\\"\"}\nstatus=completed run_id=run_1788303393465_1 turns=12 tools=14 tokens_in=15697 tokens_out=1028 cached=12416\n"
+    },
+    {
+      "task": "computed-write",
+      "verdict": "pass",
+      "detail": "expected='114\\n' got='114\\n'",
+      "rc": 0,
+      "duration_s": 36.0,
+      "tokens_in": 3760,
+      "tokens_out": 124,
+      "tokens_cached": 1728,
+      "stderr_tail": "[auto-approve] run_command {\"command\":\"cat result.txt\"}\nstatus=completed run_id=run_1788303517498_1 turns=4 tools=3 tokens_in=3760 tokens_out=124 cached=1728\n"
+    },
+    {
+      "task": "write-and-run",
+      "verdict": "pass",
+      "detail": "rc=0 out='55' err=''",
+      "rc": 0,
+      "duration_s": 25.5,
+      "tokens_in": 2980,
+      "tokens_out": 121,
+      "tokens_cached": 1856,
+      "stderr_tail": "[auto-approve] run_command {\"command\":\"python fib.py\"}\nstatus=completed run_id=run_1788303554088_1 turns=3 tools=2 tokens_in=2980 tokens_out=121 cached=1856\n"
+    }
+  ]
+}

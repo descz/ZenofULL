@@ -40,6 +40,98 @@
     },
   };
 
+  /* ---------- ZenoC backend (agente real em C11) ----------
+     Toda comunicação passa pelo servidor local (/api/zenoc/*). Quando o
+     backend não responde (file:// sem servidor, build antigo), a UI segue
+     no modo simulado sem quebrar nenhuma tela. */
+  const ZenoBackend = {
+    ok: false,
+    status: null,
+    lastError: '',
+    async fetchJSON(path, options) {
+      const response = await fetch(`${API_BASE}${path}`, options);
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+      return payload;
+    },
+    async detect() {
+      try {
+        this.status = await this.fetchJSON('/api/zenoc/status');
+        this.ok = true;
+        this.lastError = '';
+        return this.status;
+      } catch (error) {
+        this.ok = false;
+        this.status = null;
+        this.lastError = error?.message || 'backend indisponível';
+        return null;
+      }
+    },
+    models(refresh = false) {
+      return this.fetchJSON(`/api/zenoc/models${refresh ? '?refresh=1' : ''}`);
+    },
+    tools() {
+      return this.fetchJSON('/api/zenoc/tools');
+    },
+    skills() {
+      return this.fetchJSON('/api/zenoc/skills');
+    },
+    saveConfig(config) {
+      return this.fetchJSON('/api/zenoc/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
+    },
+    notes() {
+      return this.fetchJSON('/api/zenoc/memory/notes');
+    },
+    addNote(note) {
+      return this.fetchJSON('/api/zenoc/memory/notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(note) });
+    },
+    updateNote(note) {
+      return this.fetchJSON('/api/zenoc/memory/notes/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(note) });
+    },
+    deleteNote(id) {
+      return this.fetchJSON('/api/zenoc/memory/notes/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    },
+    links() {
+      return this.fetchJSON('/api/zenoc/memory/links');
+    },
+    addLink(from, to, label = '') {
+      return this.fetchJSON('/api/zenoc/memory/links', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, to, label }) });
+    },
+    cancel() {
+      return this.fetchJSON('/api/zenoc/cancel', { method: 'POST' });
+    },
+    /* Chat com streaming SSE: cada evento vira uma chamada de onEvent. */
+    async chat(payload, onEvent, signal) {
+      const response = await fetch(`${API_BASE}/api/zenoc/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+      });
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary >= 0) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          for (const line of frame.split('\n')) {
+            if (!line.startsWith('data:')) continue;
+            const raw = line.slice(5).trim();
+            if (!raw) continue;
+            try { onEvent(JSON.parse(raw)); } catch {}
+          }
+          boundary = buffer.indexOf('\n\n');
+        }
+      }
+    },
+  };
+
   /* Carrega config do servidor ANTES do state ser inicializado (sincrono, sem reload).
      Só aplica se houver conteúdo real; falha silenciosa em file:// ou sem servidor. */
   try {
@@ -110,7 +202,7 @@
     'Transforme uma ideia em execução',
   ];
 
-  const MODELS = ['DeepSeek V4 Pro', 'gpt-4o-mini', 'claude-sonnet-4-5', 'gemini-2.5-flash'];
+  let MODELS = ['DeepSeek V4 Pro', 'gpt-4o-mini', 'claude-sonnet-4-5', 'gemini-2.5-flash'];
   const AGENTS = ['Build', 'Plan', 'Ask'];
   const DESIGN_OPTIONS = [
     ['Default', 'Equilíbrio entre velocidade, contexto e profundidade.'],
@@ -316,6 +408,16 @@
     memoryEditor: null,
     chatsCollapsed: LS.get('oc-clone-chats-collapsed', false) === true,
     editProjectId: null,
+    /* Integração ZenoC */
+    backendOk: false,
+    backend: null,
+    backendSkills: [],
+    liveRun: null,
+    modelsLoading: false,
+    modelsError: '',
+    modelsFetchedAt: 0,
+    agentMode: LS.get('oc-clone-agent-mode', 'full'),
+    requireApproval: LS.get('oc-clone-require-approval', false),
   };
 
   if (!['chat', 'memory'].includes(state.workspace)) state.workspace = 'chat';
@@ -349,6 +451,144 @@
     const storedEdges = new Set(state.memoryEdges.map((edge) => edge.join('|')));
     state.memoryEdges.push(...MEMORY_EDGES.filter((edge) => !storedEdges.has(edge.join('|'))));
   }
+
+  /* ---------- integração ZenoC: helpers de UI ---------- */
+  const TOOL_TITLES = {
+    run_command: 'Shell Command', list_workspace: 'List Files', read_text_file: 'Read File',
+    write_text_file: 'Write File', append_text_file: 'Append File', replace_in_file: 'Edit File',
+    create_directory: 'Create Folder', search_workspace: 'Search Files', glob_workspace: 'Glob Files',
+    start_background_job: 'Background Job', list_background_jobs: 'List Jobs', tail_background_job: 'Read Job',
+    cancel_background_job: 'Cancel Job', memory_remember: 'Memory Remember', memory_search: 'Memory Search',
+    memory_list: 'Memory List', memory_link: 'Memory Link', http_request: 'HTTP Request', scrape_url: 'Read URL',
+    browser_navigate: 'Browse URL', git_status: 'Git Status', git_diff: 'Git Diff', git_log: 'Git Log',
+    git_checkpoint: 'Git Checkpoint', run_tests: 'Run Tests', codebase_structure: 'Codebase Scan',
+    find_symbol: 'Find Symbol', mcp_call: 'MCP Call', update_plan: 'Update Plan', spawn_subagent: 'Subagent',
+    load_skill: 'Load Skill', assert_true: 'Assert', assert_contains: 'Assert', db_query: 'Memory Query',
+    db_insert: 'Memory Insert', vision_analyze: 'Vision',
+  };
+  const prettyTool = (name) => TOOL_TITLES[name] || String(name || 'tool').replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const toolDurations = (tool) => {
+    if (!tool.startedAt) return '';
+    return `${Math.max(0.1, (Date.now() - tool.startedAt) / 1000).toFixed(1)}s`;
+  };
+  const toolArgsSummary = (args) => {
+    if (args == null) return '';
+    if (typeof args === 'string') return args;
+    const keys = ['command', 'relative_path', 'path', 'query', 'pattern', 'url', 'title', 'tool_name', 'task', 'plan_markdown'];
+    for (const key of keys) {
+      const value = args[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+      if (typeof value === 'number') return String(value);
+    }
+    try { return JSON.stringify(args); } catch { return ''; }
+  };
+  const toolOutputLines = (text) => String(text || '').replace(/\r\n/g, '\n').split('\n').slice(0, 200);
+
+  const NOTE_ACCENTS = { note: '#8b7cff', memory: '#65d7c1', mcp: '#58b6ff', skill: '#f0ad67', decision: '#f0ad67', pattern: '#e785b9', tool_sequence: '#92d36e' };
+  const NOTE_KINDS = { note: 'Note', memory: 'Memory', mcp: 'MCP', skill: 'Skill', decision: 'Decision', pattern: 'Pattern', tool_sequence: 'Pattern', auto: 'Memory' };
+  const relTimeFromMs = (ms) => {
+    if (!ms) return 'agora';
+    return relTime({ updatedAt: new Date(ms).toISOString() }) || 'agora';
+  };
+  const notePositionFor = (id) => {
+    let hash = 7;
+    for (const char of String(id)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+    const angle = (hash % 360) * Math.PI / 180;
+    const ring = 16 + ((hash >> 5) % 26);
+    return {
+      x: Math.max(5, Math.min(95, 50 + Math.cos(angle) * ring)),
+      y: Math.max(8, Math.min(92, 50 + Math.sin(angle) * ring * 0.62)),
+    };
+  };
+  const mapBackendNote = (note, source = 'ZenoC') => ({
+    id: String(note.id || 'mem_' + uid()),
+    title: String(note.title || 'Nota'),
+    tag: NOTE_KINDS[note.kind] || (note.kind ? String(note.kind) : 'Memory'),
+    excerpt: String(note.content || '').replace(/[`*_#>\n]/g, ' ').trim().slice(0, 116),
+    content: String(note.content || ''),
+    accent: NOTE_ACCENTS[note.kind] || '#8b7cff',
+    scope: note.scope || 'global',
+    tags: Array.isArray(note.tags) ? note.tags : [],
+    updated: relTimeFromMs(note.created_ms),
+    by: source,
+    backend: true,
+  });
+  const mergeBackendNotes = (notes, source = 'ZenoC') => {
+    if (!Array.isArray(notes) || !notes.length) return 0;
+    const known = new Map(state.memoryNotes.map((note) => [note.id, note]));
+    let added = 0;
+    notes.forEach((raw) => {
+      const mapped = mapBackendNote(raw, source);
+      const found = known.get(mapped.id);
+      if (found) { Object.assign(found, mapped, { x: found.x, y: found.y }); }
+      else { const pos = notePositionFor(mapped.id); state.memoryNotes.push({ ...mapped, x: pos.x, y: pos.y }); known.set(mapped.id, true); added++; }
+    });
+    if (added) LS.set('oc-clone-memory-notes', state.memoryNotes);
+    return added;
+  };
+  const mergeBackendLinks = (links) => {
+    if (!Array.isArray(links) || !links.length) return 0;
+    const known = new Set(state.memoryEdges.map((edge) => edge.join('|')));
+    let added = 0;
+    links.forEach((link) => {
+      const from = String(link.from || '');
+      const to = String(link.to || '');
+      if (!from || !to || from === to) return;
+      const key = [from, to].join('|');
+      if (known.has(key)) return;
+      known.add(key);
+      state.memoryEdges.push([from, to]);
+      added++;
+    });
+    if (added) LS.set('oc-clone-memory-edges', state.memoryEdges);
+    return added;
+  };
+  const applyModels = (payload) => {
+    const list = [];
+    if (payload && payload.model) list.push(payload.model);
+    (payload && Array.isArray(payload.models) ? payload.models : []).forEach((model) => { if (model && !list.includes(model)) list.push(model); });
+    if (list.length) {
+      MODELS = list;
+      state.modelsFetchedAt = payload.updated_ms || Date.now();
+      state.modelsError = payload.error || '';
+    }
+    return list;
+  };
+  const refreshMemoryFromBackend = async () => {
+    if (!state.backendOk) return;
+    try {
+      const [notes, links, skills] = await Promise.all([ZenoBackend.notes(), ZenoBackend.links(), ZenoBackend.skills()]);
+      let changed = mergeBackendNotes(notes);
+      if (Array.isArray(skills)) {
+        state.backendSkills = skills;
+        changed += mergeBackendNotes(skills.map((skill) => ({
+          id: `skill-${skill.id}`,
+          title: skill.name || skill.id,
+          kind: 'skill',
+          scope: 'skills',
+          tags: skill.category ? [skill.category] : [],
+          content: `# ${skill.name || skill.id}\n\n${skill.description || ''}\n\n\`${skill.path || ''}\``,
+        })), 'Skills');
+      }
+      changed += mergeBackendLinks(links);
+      if (changed && state.workspace === 'memory') render();
+    } catch {}
+  };
+  const initBackend = async () => {
+    const status = await ZenoBackend.detect();
+    if (!status) return;
+    state.backendOk = true;
+    state.backend = status;
+    if (status.agent_mode) state.agentMode = status.agent_mode;
+    if (status.require_approval !== undefined) state.requireApproval = !!status.require_approval;
+    if (typeof status.model === 'string' && status.model) {
+      state.model = status.model;
+      LS.set('oc-clone-model', state.model);
+    }
+    try { applyModels(await ZenoBackend.models(false)); } catch {}
+    await refreshMemoryFromBackend();
+    render();
+  };
 
   const PANELS = {
     Context: ['oc-donut-chart-fill', 502],
@@ -580,7 +820,7 @@
       <div class="group/tool flex items-baseline gap-2 cursor-pointer" role="button" tabindex="0" data-tool-key="${toolKey}">
         <span class="flex-shrink-0 text-[13px] font-semibold text-foreground" title="${esc(tool.title)}">${esc(tool.title)}</span>
         <span class="min-w-0 flex-1 truncate text-[13px] leading-6 text-muted-foreground" title="${esc(tool.cmd)}">${esc(shownCmd)}${typing ? '<span class="tool-caret"></span>' : ''}</span>
-        ${tool.duration ? `<span class="flex-shrink-0 text-[12px] tabular-nums text-muted-foreground/60">${esc(tool.duration)}</span>` : ''}
+        ${tool.running ? '<span class="oc-spinner" aria-hidden="true"></span>' : (tool.duration ? `<span class="flex-shrink-0 text-[12px] tabular-nums text-muted-foreground/60">${esc(tool.duration)}</span>` : '')}
       </div>
       ${expanded ? `
       <div class="mt-1.5 rounded-lg border border-border/70 bg-[var(--surface-elevated)] px-3.5 py-3">
@@ -589,27 +829,36 @@
     </div>`;
   };
 
-  /* Bloco "Explorado N leituras, M pesquisas" — resumo colapsável do raciocínio */
+  /* Bloco "Pensamento" — raciocínio + ferramentas do agente ZenoC.
+     Substitui o antigo resumo "Explorado N leituras, M pesquisas" e usa a
+     mesma renderização de tools (tplToolRow) para os passos aparecerem
+     exatamente quando o runtime os executa. */
   const tplThinkingBlock = (m) => {
     const key = 'think_' + m.id;
-    const expanded = !!state.expandedTools[key];
+    const streaming = !!m.streaming;
+    const expanded = streaming || !!state.expandedTools[key];
     const tools = m.tools || [];
-    const isSearch = (t) => /select-string|grep|rg\b|findstr|search|where-object|startpage|duckduckgo/i.test(t.cmd || '');
-    const reads = tools.filter((t) => !isSearch(t)).length;
-    const searches = tools.length - reads;
+    const running = tools.filter((tool) => tool.running).length;
     const parts = [];
-    if (reads) parts.push(`${reads} ${reads === 1 ? 'leitura' : 'leituras'}`);
-    if (searches) parts.push(`${searches} ${searches === 1 ? 'pesquisa' : 'pesquisas'}`);
-    const summary = parts.join(', ') || `${tools.length || 1} ${tools.length === 1 ? 'passo' : 'passos'}`;
+    if (tools.length) parts.push(`${tools.length} ${tools.length === 1 ? 'ferramenta' : 'ferramentas'}`);
+    if (m.thinking) parts.push('raciocínio');
+    const summary = streaming && !tools.length && !m.thinking
+      ? 'Pensando…'
+      : parts.join(' · ') || (streaming ? 'Trabalhando…' : 'Raciocínio');
+    const thinkingText = m.thinking || '';
     return `
     <div class="py-1">
       <div class="group/tool flex items-center gap-1.5 cursor-pointer" role="button" tabindex="0" data-tool-key="${key}">
-        <span class="text-[13px] font-semibold text-foreground">Explorado</span>
+        <span class="text-[13px] font-semibold text-foreground">Pensamento</span>
         <span class="text-[13px] text-muted-foreground">${esc(summary)}</span>
+        ${streaming ? `<span class="oc-spinner" aria-hidden="true"></span>${running ? `<span class="text-[12px] text-muted-foreground/70">${running} em execução</span>` : ''}` : ''}
         <span class="text-muted-foreground/60 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}">${icon('oc-arrow-right-s', 'remixicon h-3.5 w-3.5')}</span>
       </div>
       ${expanded ? `
-      <div class="mt-1.5 pl-0.5 text-[13px] leading-relaxed text-muted-foreground" style="white-space: pre-wrap;">${esc(m.thinking)}</div>` : ''}
+      <div class="mt-1.5 pl-0.5">
+        ${thinkingText ? `<div class="text-[13px] leading-relaxed text-muted-foreground" style="white-space: pre-wrap;">${renderMarkdown(thinkingText)}</div>` : ''}
+        ${tools.length ? `<div class="mt-1.5">${tools.map((tool, index) => tplToolRow(tool, `${m.id}_t${index}`, 'done')).join('')}</div>` : ''}
+      </div>` : ''}
     </div>`;
   };
 
@@ -783,7 +1032,9 @@
               <span data-dictation-label aria-live="polite"></span>
               <button type="button" data-action="voice-mode" class="zeno-icon-btn" title="Conversar por voz" aria-label="Conversar por voz">${icon('oc-pulse', 'remixicon h-[18px] w-[18px]')}</button>
               <button type="button" data-action="dictation" data-dictation-phase="idle" class="zeno-icon-btn" title="Ditar mensagem" aria-label="Ditar mensagem">${icon('oc-mic', 'remixicon h-[18px] w-[18px]')}</button>
-              <button type="submit" data-action="send" class="zeno-icon-btn" aria-label="Send message">${icon('oc-send-plane-2', 'remixicon h-[18px] w-[18px]')}</button>
+              ${state.liveRun
+                ? `<button type="button" data-action="cancel-run" class="zeno-icon-btn" aria-label="Parar o agente" title="Parar o agente">${icon('oc-stop', 'remixicon h-[18px] w-[18px]')}</button>`
+                : `<button type="submit" data-action="send" class="zeno-icon-btn" aria-label="Send message">${icon('oc-send-plane-2', 'remixicon h-[18px] w-[18px]')}</button>`}
             </div>
           </div>
         </div>
@@ -858,9 +1109,9 @@
 
   const tplAssistantMsg = (m) => {
     let body = '';
-    if (m.thinking) body += tplThinkingBlock(m);
-    if (m.tools) body += m.tools.map((t, i) => tplToolRow(t, m.id + '_t' + i, 'done')).join('');
+    if (m.thinking || (m.tools && m.tools.length)) body += tplThinkingBlock(m);
     if (m.text) body += renderMarkdown(m.text);
+    if (m.error) body += `<div class="zeno-run-error" role="alert">${icon('oc-error-warning', 'remixicon h-4 w-4')}<div><strong>O agente não conseguiu concluir.</strong><span>${esc(m.error)}</span></div></div>`;
     if (m.code) {
       const lines = m.code.lines.map(([t]) => t).join('');
       body += `<div data-component="markdown-code" class="my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]" data-code-wrap="true">
@@ -1002,6 +1253,14 @@
     }).join('');
     return `<div class="memory-view" data-memory-view>
       <header class="memory-overlay-heading"><h1>Zeno Agent Memory</h1><p>Your knowledge, notes and skills connected in one living graph.</p></header>
+      <div class="memory-backend-bar">
+        <span class="zeno-status-dot ${state.backendOk ? 'is-on' : ''}"></span>
+        <span>${state.backendOk ? 'ZenoC conectado' : 'Modo local'}</span>
+        <span class="memory-backend-count">${notes.length} nota${notes.length === 1 ? '' : 's'} · ${state.memoryEdges.length} link${state.memoryEdges.length === 1 ? '' : 's'}${state.backendSkills && state.backendSkills.length ? ` · ${state.backendSkills.length} skill${state.backendSkills.length === 1 ? '' : 's'}` : ''}</span>
+        <span class="flex-1"></span>
+        <button type="button" data-action="memory-refresh" class="zeno-mini-btn" title="Sincronizar com o agente">${icon('oc-refresh', 'remixicon h-3 w-3')}Atualizar</button>
+        <button type="button" data-action="memory-new" class="zeno-mini-btn" title="Criar nota">${icon('oc-add', 'remixicon h-3 w-3')}Nova nota</button>
+      </div>
       <div class="memory-map-viewport" data-memory-viewport>
         <svg class="memory-map-canvas" data-memory-canvas viewBox="0 0 1600 900" aria-label="Memory knowledge graph">
           <defs><pattern id="memory-grid" width="30" height="30" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" class="memory-grid-dot"></circle></pattern></defs>
@@ -1037,7 +1296,7 @@
                       <div class="relative w-full"></div>
                       <div class="pt-4">
                         ${s.messages.map((m) => m.role === 'user' ? tplUserMsg(m) : tplAssistantMsg(m)).join('')}
-                        ${state.typing ? tplTyping() : ''}
+                        ${state.liveRun ? tplAssistantMsg(state.liveRun) : (state.typing ? tplTyping() : '')}
                       </div>
                     </div>
                   </div>
@@ -1247,7 +1506,8 @@
   /* ---------- templates: settings ---------- */
   const SETTINGS_GROUPS = [
     ['General', [
-      ['Appearance', 'oc-palette'], ['Chat', 'oc-chat-ai-3'], ['Notifications', 'oc-notification-3'],
+      ['Appearance', 'oc-palette'], ['Chat', 'oc-chat-ai-3'], ['Models', 'oc-robot'],
+      ['Notifications', 'oc-notification-3'],
       ['Shortcuts', 'oc-command'], ['Voice', 'oc-mic'], ['Usage', 'oc-bar-chart-2'],
     ]],
     ['Workspace', [
@@ -1289,6 +1549,9 @@
     <select ${attr} class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-2 text-sm text-foreground outline-none" style="background: var(--background);">
       ${options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}
     </select>`;
+
+  const tplSettingsInput = (attr, value, type = 'text', placeholder = '') => `
+    <input ${attr} type="${type}" value="${esc(value || '')}" placeholder="${esc(placeholder)}" spellcheck="false" autocomplete="off" class="h-8 w-full max-w-[28rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">`;
 
   const tplSettingsSection = () => {
     const sec = state.settingsSection;
@@ -1442,6 +1705,45 @@
               class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">
           </div>
           <button type="button" data-action="voice-test" class="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground transition-colors">${icon('oc-mic', 'remixicon h-3.5 w-3.5')}Testar voz</button>
+        </div>
+      </div>`;
+    }
+    if (sec === 'Models') {
+      const backend = state.backend || {};
+      const statusLine = state.backendOk
+        ? `ZenoC ${backend.version || ''} online${backend.adapter ? ` · ${backend.adapter}` : ''}`
+        : 'ZenoC offline (modo simulado)';
+      const configuredModels = MODELS;
+      return `
+      <div class="px-6 py-5">
+        <h2 class="typography-h3 text-foreground">Models</h2>
+        <p class="typography-meta mt-1 text-muted-foreground">Conecte a API OpenAI-compatível usada pelo agente ZenoC. Os modelos ficam disponíveis aqui, no menu /model e no botão de anexos.</p>
+        <div class="mt-4 max-w-[30rem] rounded-lg border border-border/70 bg-[var(--surface-elevated)] p-3">
+          <div class="flex items-center gap-2 text-xs ${state.backendOk ? 'text-foreground' : 'text-muted-foreground'}">
+            <span class="zeno-status-dot ${state.backendOk ? 'is-on' : ''}"></span>
+            <strong>${esc(statusLine)}</strong>
+            ${backend.memory_notes !== undefined ? `<span class="text-muted-foreground">· ${backend.memory_notes} nota${backend.memory_notes === 1 ? '' : 's'} · ${backend.skills || 0} skill${backend.skills === 1 ? '' : 's'}</span>` : ''}
+          </div>
+          ${state.modelsError ? `<div class="zeno-models-note">${esc(state.modelsError)}</div>` : ''}
+        </div>
+        <div class="mt-6 grid max-w-[34rem] grid-cols-1 gap-4 @3xl:grid-cols-2">
+          ${tplSettingsField('Provider', tplSettingsInput('data-models-field="provider"', backend.provider || 'openai', 'text', 'openai'))}
+          ${tplSettingsField('Base URL', tplSettingsInput('data-models-field="base_url"', backend.base_url || 'https://api.openai.com/v1', 'text', 'https://api.openai.com/v1'))}
+          ${tplSettingsField('API key', tplSettingsInput('data-models-field="api_key"', '', 'password', backend.api_key === 'configured' ? 'já configurada — deixe vazio para manter' : 'sk-…'))}
+          ${tplSettingsField('Modelo padrão', tplSettingsInput('data-models-field="model"', backend.model || state.model, 'text', 'gpt-4o-mini'))}
+          ${tplSettingsField('Modelos de fallback', tplSettingsInput('data-models-field="fallback_models"', backend.fallback_models || '', 'text', 'modelo-a,modelo-b'))}
+          ${tplSettingsField('Workspace do agente', tplSettingsInput('data-models-field="workspace"', backend.workspace || '.', 'text', '.'))}
+          ${tplSettingsField('Modo do agente', tplNativeSelect('data-models-field="agent_mode"', state.agentMode, [['full', 'Full (todas as ferramentas)'], ['minimal', 'Minimal (4 ferramentas)']]))}
+        </div>
+        <div class="mt-4 flex flex-wrap items-center gap-2">
+          <button type="button" data-action="models-save" class="zeno-mini-btn">Salvar configuração</button>
+          <button type="button" data-action="models-refresh" class="zeno-mini-btn" ${state.modelsLoading ? 'disabled' : ''}>${state.modelsLoading ? 'Buscando…' : 'Buscar modelos da API'}</button>
+        </div>
+        <div class="mt-6">
+          <h3 class="typography-ui-label font-semibold text-foreground">Modelos disponíveis (${configuredModels.length})</h3>
+          <div class="mt-2 flex max-w-[34rem] flex-wrap gap-1.5">
+            ${configuredModels.map((name) => `<button type="button" data-action="models-pick" data-model="${esc(name)}" class="zeno-model-chip ${name === state.model ? 'is-on' : ''}">${name === state.model ? icon('oc-check', 'remixicon h-3 w-3') : ''}${esc(name)}</button>`).join('') || '<span class="text-xs text-muted-foreground">Nenhum modelo ainda. Informe a API key e clique em Buscar.</span>'}
+          </div>
         </div>
       </div>`;
     }
@@ -1796,6 +2098,7 @@
           if (to && to !== from && !state.memoryEdges.some((edge) => edge.includes(from) && edge.includes(to))) {
             state.memoryEdges.push([from, to]);
             LS.set('oc-clone-memory-edges', state.memoryEdges);
+            if (state.backendOk) void ZenoBackend.addLink(from, to).catch(() => {});
             render();
             return;
           }
@@ -1847,18 +2150,42 @@
         state.memoryEdges = state.memoryEdges.filter((edge) => !edge.includes(note.id));
         LS.set('oc-clone-memory-notes', state.memoryNotes);
         LS.set('oc-clone-memory-edges', state.memoryEdges);
+        if (state.backendOk && note.backend) void ZenoBackend.deleteNote(note.id).catch(() => {});
       }
       state.memoryDeleteId = null;
       render();
     });
+    $('[data-action="memory-refresh"]', rootEl)?.addEventListener('click', () => { void refreshMemoryFromBackend().then(() => render()); });
+    $('[data-action="memory-new"]', rootEl)?.addEventListener('click', () => createMemoryNoteAt(50, 52));
     $('[data-action="edit-memory-note"]', rootEl)?.addEventListener('click', () => openMemoryEditor(memoryNoteById(state.noteId)));
     $('[data-action="save-memory-note"]', rootEl)?.addEventListener('click', () => {
       const note = memoryNoteById(state.noteId);
       if (!note) return;
+      const isNew = !!state.memoryEditor?.isNew;
       note.title = $('[data-memory-title]', rootEl).value.trim() || 'Untitled note';
       note.content = $('[data-memory-content]', rootEl).value;
       note.excerpt = note.content.replace(/[`*_#\n]/g, ' ').trim().slice(0, 116);
-      state.memoryEditor = null; LS.set('oc-clone-memory-notes', state.memoryNotes); render();
+      state.memoryEditor = null;
+      LS.set('oc-clone-memory-notes', state.memoryNotes);
+      render();
+      if (!state.backendOk) return;
+      if (isNew) {
+        void ZenoBackend.addNote({ title: note.title, content: note.content, kind: 'note', tags_json: '[]' }).then((saved) => {
+          if (!saved || !saved.id) return;
+          const index = state.memoryNotes.findIndex((item) => item.id === note.id);
+          if (index < 0) return;
+          const replacement = mapBackendNote(saved);
+          replacement.x = note.x;
+          replacement.y = note.y;
+          state.memoryNotes[index] = replacement;
+          state.memoryEdges = state.memoryEdges.map((edge) => edge.map((id) => id === note.id ? saved.id : id));
+          LS.set('oc-clone-memory-notes', state.memoryNotes);
+          LS.set('oc-clone-memory-edges', state.memoryEdges);
+          render();
+        }).catch(() => {});
+      } else if (note.backend) {
+        void ZenoBackend.updateNote({ id: note.id, title: note.title, content: note.content }).catch(() => {});
+      }
     });
     $('[data-action="discard-memory-note"]', rootEl)?.addEventListener('click', () => {
       if (state.memoryEditor?.isNew) state.memoryNotes = state.memoryNotes.filter((note) => note.id !== state.noteId);
@@ -2903,6 +3230,137 @@
     document.body.appendChild(overlay);
   };
 
+  /* ---------- execução do agente (ZenoC) e renderização ao vivo ---------- */
+  const scheduleLiveRender = (() => {
+    let pending = false;
+    return () => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => { pending = false; render(true); });
+    };
+  })();
+
+  const applyRunEvent = (live, event) => {
+    if (!event || !event.type) return;
+    if (event.type === 'run_started') {
+      live.runId = event.run_id || live.runId;
+      if (event.model) live.model = event.model;
+      return;
+    }
+    if (event.type === 'thinking') {
+      const text = String(event.text || '').trim();
+      if (text) live.thinking = live.thinking ? `${live.thinking}\n${text}` : text;
+      return;
+    }
+    if (event.type === 'tool_started') {
+      live.tools.push({
+        id: 'tool_' + uid(), name: event.tool || 'tool', title: prettyTool(event.tool),
+        cmd: toolArgsSummary(event.args), args: event.args, output: [], ok: null,
+        running: true, startedAt: Date.now(), duration: '',
+      });
+      return;
+    }
+    if (event.type === 'tool_completed') {
+      const name = event.tool || 'tool';
+      let tool = null;
+      for (let index = live.tools.length - 1; index >= 0; index--) {
+        if (live.tools[index].name === name && live.tools[index].running) { tool = live.tools[index]; break; }
+      }
+      if (!tool) {
+        tool = { id: 'tool_' + uid(), name, title: prettyTool(name), cmd: '', args: null, output: [], ok: null, running: true, startedAt: Date.now(), duration: '' };
+        live.tools.push(tool);
+      }
+      tool.running = false;
+      tool.ok = event.ok !== false;
+      tool.duration = toolDurations(tool);
+      tool.output = toolOutputLines(event.output);
+      return;
+    }
+    if (event.type === 'text') {
+      live.text += String(event.delta || '');
+      return;
+    }
+    if (event.type === 'run_completed') {
+      live.status = event.status || live.status;
+      live.turns = event.turns;
+      live.toolCalls = event.tool_calls;
+      live.tokensIn = event.tokens_in;
+      live.tokensOut = event.tokens_out;
+      if (event.duration_ms) live.duration = `${(event.duration_ms / 1000).toFixed(1)}s`;
+      return;
+    }
+    if (event.type === 'error') {
+      live.error = event.message || 'Erro no agente.';
+      return;
+    }
+    if (event.type === 'result' && event.result) {
+      const result = event.result;
+      live.status = result.status || live.status;
+      live.runId = result.run_id || live.runId;
+      live.turns = result.turns;
+      live.toolCalls = result.tool_calls;
+      live.tokensIn = result.tokens_in;
+      live.tokensOut = result.tokens_out;
+      if (result.model) live.model = result.model;
+      if (!live.text && result.response) live.text = result.response;
+      if (result.provider_error && result.status !== 'completed') live.error = result.provider_error;
+      else if (result.status && result.status !== 'completed' && !live.error) live.error = result.response || result.status;
+      if (result.duration_ms) live.duration = `${(result.duration_ms / 1000).toFixed(1)}s`;
+    }
+  };
+
+  const finalizeRun = (session, live) => {
+    if (state.liveRun !== live) return;
+    live.streaming = false;
+    live.tools.forEach((tool) => { if (tool.running) { tool.running = false; tool.duration = toolDurations(tool); } });
+    if (!live.duration && live.startedAt) live.duration = `${((Date.now() - live.startedAt) / 1000).toFixed(1)}s`;
+    if (!live.text && !live.thinking && !live.tools.length && !live.error) live.error = 'O agente terminou sem enviar conteúdo.';
+    session.messages.push({
+      id: live.id, role: 'assistant', time: fmtTime(now()), model: live.model, agent: live.agent,
+      thinking: live.thinking,
+      tools: live.tools.map((tool) => ({ title: tool.title, cmd: tool.cmd, output: tool.output, duration: tool.duration, ok: tool.ok })),
+      text: live.text, error: live.error || '', duration: live.duration,
+      tokensIn: live.tokensIn, tokensOut: live.tokensOut, status: live.status,
+    });
+    state.liveRun = null;
+    state.typing = false;
+    LS.set('oc-clone-sessions', state.sessions);
+    render(true);
+    setTimeout(() => { void refreshMemoryFromBackend(); }, 400);
+    if (state.voiceMode && voiceRuntime && !voiceRuntime.stopped) {
+      if (live.text) {
+        voicePushLine(voiceRuntime, 'zeno', live.text);
+        if (state.voiceAutoSpeak !== false) void voiceSpeak(voiceRuntime, live.text);
+      }
+      if (voicePendingQueue.length) {
+        const next = voicePendingQueue.shift();
+        setTimeout(() => deliverUserText(next), 250);
+      }
+    }
+  };
+
+  const startBackendRun = (session, clean) => {
+    const live = {
+      id: 'msg_' + uid(), role: 'assistant', time: fmtTime(now()), model: state.model,
+      agent: state.agentMode === 'minimal' ? 'plan' : 'build',
+      thinking: '', tools: [], text: '', error: '', streaming: true,
+      startedAt: Date.now(), duration: '', runId: '',
+    };
+    state.expandedTools['think_' + live.id] = true;
+    state.liveRun = live;
+    state.typing = true;
+    render(true);
+    ZenoBackend.chat({ message: clean, model: state.model, session: session.id }, (event) => {
+      applyRunEvent(live, event);
+      scheduleLiveRender();
+    }).then(() => {
+      finalizeRun(session, live);
+    }).catch((error) => {
+      live.error = live.error || error?.message || 'Falha de conexão com o agente ZenoC.';
+      finalizeRun(session, live);
+    });
+  };
+
   const deliverUserText = (text) => {
     const clean = String(text || '').trim();
     if (!clean) return false;
@@ -2916,6 +3374,10 @@
     const s = activeSession();
     if (!s) return false;
     s.messages.push({ id: 'msg_' + uid(), role: 'user', text: clean, time: fmtTime(now()), snapshot: captureWorkspaceSnapshot() });
+    if (state.backendOk) {
+      startBackendRun(s, clean);
+      return true;
+    }
     state.liveTrace = [{ id: 'live_thinking', type: 'thinking', label: 'Thinking', icon: 'oc-brain-ai-3', text: 'Processando a solicitação…', meta: 'live' }];
     state.typing = true;
     render(true);
@@ -3528,8 +3990,13 @@
       if (attachWrap && attachWrap.classList.contains('is-open') && !attachWrap.contains(event.target)) closeAttachPanel();
     });
     $('[data-action="voice-mode"]', form)?.addEventListener('click', () => setVoiceMode(true));
+    $('[data-action="cancel-run"]', form)?.addEventListener('click', async () => {
+      flashComposerHint(form, 'Parando o agente…');
+      try { await ZenoBackend.cancel(); } catch {}
+    });
     const send = $('[data-action="send"]', form);
     const syncSend = () => {
+      if (!send) return;
       const has = getComposerText(input).length > 0;
       send.disabled = !has;
       send.classList.toggle('opacity-30', !has);
@@ -3636,7 +4103,63 @@
   };
 
   /* Liga os controles da aba ativa (chamado a cada troca de seção). */
+  const refreshModels = async (rootEl, useRemote) => {
+    state.modelsLoading = true;
+    refreshSettingsContent(rootEl);
+    try {
+      const payload = await ZenoBackend.models(!!useRemote);
+      applyModels(payload);
+      state.modelsError = payload.error || '';
+      const status = await ZenoBackend.detect();
+      if (status) { state.backend = status; state.backendOk = true; }
+    } catch (error) {
+      state.modelsError = error.message || 'Falha ao buscar modelos.';
+      await ZenoBackend.detect();
+      state.backendOk = ZenoBackend.ok;
+      state.backend = ZenoBackend.status || state.backend;
+    }
+    state.modelsLoading = false;
+    refreshSettingsContent(rootEl);
+    render();
+  };
+
   const bindSettingsSection = (rootEl) => {
+    /* Integração ZenoC: aba Models */
+    $('[data-action="models-save"]', rootEl)?.addEventListener('click', async () => {
+      const value = (field) => ($(`[data-models-field="${field}"]`, rootEl)?.value || '').trim();
+      const payload = {
+        provider: value('provider') || 'openai',
+        base_url: value('base_url'),
+        model: value('model'),
+        fallback_models: value('fallback_models'),
+        workspace: value('workspace') || '.',
+        agent_mode: value('agent_mode') || state.agentMode,
+        require_approval: state.requireApproval,
+      };
+      const apiKey = value('api_key');
+      if (apiKey) payload.api_key = apiKey;
+      if (!payload.base_url) { flashSettingsNote(rootEl, 'Informe a Base URL do provider.'); return; }
+      try {
+        await ZenoBackend.saveConfig(payload);
+        state.agentMode = payload.agent_mode;
+        LS.set('oc-clone-agent-mode', state.agentMode);
+        if (payload.model) { state.model = payload.model; LS.set('oc-clone-model', state.model); }
+        state.backendOk = true;
+        await refreshModels(rootEl, false);
+        flashSettingsNote(rootEl, 'Configuração salva.');
+      } catch (error) {
+        flashSettingsNote(rootEl, `Falha ao salvar: ${error.message}`);
+      }
+    });
+    $('[data-action="models-refresh"]', rootEl)?.addEventListener('click', () => { void refreshModels(rootEl, true); });
+    $$('[data-action="models-pick"]', rootEl).forEach((button) => button.addEventListener('click', async () => {
+      state.model = button.dataset.model;
+      LS.set('oc-clone-model', state.model);
+      try { await ZenoBackend.saveConfig({ model: state.model }); } catch {}
+      refreshSettingsContent(rootEl);
+      render();
+    }));
+
     /* Selects dropdown (light/dark theme, lang, timefmt, orientation, startup) */
     $$('[data-select-menu]', rootEl).forEach((b) => b.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -4074,6 +4597,10 @@
 
     const splash = $('#initial-loading');
     setTimeout(() => { if (splash) { splash.classList.add('fade-out'); setTimeout(() => splash.remove(), 400); } }, 350);
+
+    /* Conecta ao agente ZenoC em segundo plano. Se o backend não responder,
+       tudo segue no modo simulado sem quebrar a UI. */
+    void initBackend();
   };
 
   const bindGlobal = () => {

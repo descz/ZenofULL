@@ -1,9 +1,0 @@
-{
-    "version":  1,
-    "files":  {
-                  "SKILL.md":  "1f257053408b20d11666fbf07185220a13f6e87f64f7b803ad41a33ac9f00711",
-                  "references/strategies.md":  "85c530e31012ed06b6b65dd0db0a92244c66db6f96dbfa390b644cc0e6047cf6",
-                  "scripts/scraper_engine.py":  "59570974586875fedfa22a3c5fda21ac1abf4c125d231925cb80ec64422e6df0",
-                  "evals/evals.json":  "3a9495df7726b19f8c9aeeb6d99f25a2c6149808a3d1d953527302e2c091916b"
-              }
-}

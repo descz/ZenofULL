@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install curl development headers
+        run: sudo apt-get update && sudo apt-get install --yes libcurl4-openssl-dev
+      - name: Configure
+        run: cmake -S . -B build -DZENO_ENABLE_CURL=ON -DZENO_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Install and consume package
+        run: |
+          cmake --install build --prefix "$PWD/install"
+          cmake -S tests/package_consumer -B build-consumer -DCMAKE_PREFIX_PATH="$PWD/install"
+          cmake --build build-consumer --parallel
+
+  linux-sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure sanitizers
+        run: >-
+          cmake -S . -B build-asan -DZENO_ENABLE_CURL=OFF -DZENO_BUILD_TESTS=ON
+          -DCMAKE_BUILD_TYPE=Debug
+          -DZENO_WERROR=ON
+          '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer'
+          '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined'
+      - name: Build
+        run: cmake --build build-asan --parallel
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build-asan --output-on-failure
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DZENO_ENABLE_CURL=OFF -DZENO_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Install and consume package
+        shell: pwsh
+        run: |
+          cmake --install build --config Release --prefix "$PWD/install"
+          cmake -S tests/package_consumer -B build-consumer -DCMAKE_PREFIX_PATH="$PWD/install"
+          cmake --build build-consumer --config Release --parallel

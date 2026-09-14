@@ -4,14 +4,21 @@
 # Ambiente local / configs de CLI
 .zcode/
 
-# Backups e builds
+# Backups
 *.bak
 *.bak-*
-wails-app/build/bin/
-wails-app/frontend/dist/
+
+# Build artifacts
+ZenoC/build/
+CMakeFiles/
+*.obj
+*.o
+*.a
+*.exe
+*.obj.d
+*.log
+/tmp/
 
 # Sistema
 Thumbs.db
 Desktop.ini
-
-!.env.example

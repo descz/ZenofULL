@@ -690,7 +690,7 @@ body:has(.memory-note-layer) .workspace-stage > div.relative.z-20 {
 .zeno-sidebar-empty-icon {
   display: inline-flex;
   margin-top: 1px;
-  color: #b48cff;
+  color: #fff;
 }
 .zeno-sidebar-footer {
   display: flex;
@@ -1697,7 +1697,7 @@ body:has(.memory-view) [data-panel-root] {
 
 /* ---------- composer footer: aligned icon buttons ---------- */
 [data-chat-input-footer] {
-  min-height: 48px;
+  min-height: 44px;
 }
 .zeno-icon-btn {
   display: inline-flex;
@@ -1809,49 +1809,62 @@ body:has(.memory-view) [data-panel-root] {
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
-/* ---------- voice mode ---------- */
-body.zeno-voice-active #chat-root {
-  visibility: hidden;
-  pointer-events: none;
+/* ---------- voice mode: ondas dentro do composer (sem pop-up) ---------- */
+body.zeno-voice-active [data-composer-shell] {
+  border-color: #58b6ff;
+  box-shadow: 0 0 0 1px rgb(88 182 255 / 0.3), 0 6px 26px -10px rgb(88 182 255 / 0.5);
 }
-.zeno-voice-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 30;
+.zeno-voice-inline {
   display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 0 clamp(16px, 5vw, 80px) clamp(28px, 8vh, 88px);
-  pointer-events: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 8px;
 }
-.zeno-voice-panel {
-  width: min(640px, 94%);
-  pointer-events: auto;
-  border-radius: var(--radius-xl);
-  border: 1px solid rgb(255 255 255 / 0.15);
-  background: rgb(12 12 14 / 0.55);
-  backdrop-filter: blur(14px) saturate(115%);
-  -webkit-backdrop-filter: blur(14px) saturate(115%);
-  box-shadow: 0 14px 45px rgb(0 0 0 / 0.34);
-  padding: 18px 20px;
-  text-align: center;
-}
-.zeno-voice-status {
+.zeno-voice-inline-head {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
-  font-size: 13px;
-  color: var(--foreground);
   min-height: 22px;
 }
-.zeno-voice-status .oc-spinner {
-  width: 14px;
-  height: 14px;
+.zeno-voice-inline-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--foreground);
+}
+.zeno-voice-inline-state .oc-spinner {
+  width: 13px;
+  height: 13px;
+}
+.zeno-voice-inline-meta {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.zeno-voice-inline-exit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  width: 26px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1px solid var(--interactive-border);
+  background: rgb(255 95 86 / 0.14);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.zeno-voice-inline-exit:hover {
+  background: rgb(255 95 86 / 0.28);
 }
 .zeno-voice-live-dot {
   width: 8px;
   height: 8px;
+  flex-shrink: 0;
   border-radius: 999px;
   background: #ff5f56;
   animation: zeno-blink 1.2s ease infinite;
@@ -1860,11 +1873,18 @@ body.zeno-voice-active #chat-root {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.25; }
 }
+.zeno-voice-wave {
+  display: block;
+  width: 100%;
+  height: 64px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.03);
+  border: 1px solid rgb(255 255 255 / 0.06);
+}
 .zeno-voice-meter {
-  height: 4px;
+  height: 3px;
   border-radius: 999px;
   background: rgb(255 255 255 / 0.12);
-  margin: 14px 0 6px;
   overflow: hidden;
 }
 .zeno-voice-meter > div {
@@ -1874,42 +1894,510 @@ body.zeno-voice-active #chat-root {
   background: linear-gradient(90deg, #58b6ff, #b388ff);
   transition: width 90ms linear;
 }
-.zeno-voice-transcript {
-  min-height: 44px;
-  max-height: 132px;
-  overflow-y: auto;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--muted-foreground);
-  margin: 8px 0 4px;
+
+/* ---------- settings toggles & blocks ---------- */
+.zeno-toggle {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  box-shadow: inset 0 0 0 1px var(--interactive-border);
+  transition: background 150ms ease;
 }
-.zeno-voice-transcript strong {
-  color: var(--foreground);
-  font-weight: 500;
+.zeno-toggle > span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fff;
+  opacity: 0.75;
+  transition: transform 150ms ease, opacity 150ms ease;
 }
-.zeno-voice-actions {
+.zeno-toggle.is-on { background: #7c5cff; }
+.zeno-toggle.is-on > span { transform: translateX(14px); opacity: 1; }
+.zeno-setting-block {
+  border: 1px solid var(--interactive-border);
+  border-radius: 12px;
+  background: var(--surface-elevated);
+  padding: 12px;
+}
+.zeno-setting-block-head {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
-  margin-top: 12px;
 }
-.zeno-voice-end {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 999px;
-  border: 1px solid var(--interactive-border);
-  background: rgb(255 95 86 / 0.14);
-  color: var(--foreground);
+.zeno-setting-block-title {
+  min-width: 0;
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: none;
   font-size: 13px;
-  padding: 8px 18px;
-  cursor: pointer;
+  font-weight: 600;
+  color: var(--foreground);
+  border-bottom: 1px dashed transparent;
 }
-.zeno-voice-end:hover {
-  background: rgb(255 95 86 / 0.25);
-}
-.zeno-voice-lang {
+.zeno-setting-block-title:hover { border-bottom-color: var(--interactive-border); }
+.zeno-setting-block-title:focus { border-bottom-color: var(--primary); }
+.zeno-setting-block-meta {
+  flex: 0 0 auto;
   font-size: 11px;
   color: var(--muted-foreground);
 }
+.zeno-setting-block-folders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.zeno-setting-block-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.zeno-mini-btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 7px;
+  border: 1px solid var(--interactive-border);
+  color: var(--foreground);
+  background: transparent;
+  white-space: nowrap;
+}
+.zeno-mini-btn:hover { background: var(--interactive-hover); }
+.zeno-mini-btn.is-danger { color: #ff8a80; }
+.zeno-mini-btn.is-danger:hover { background: rgb(255 95 86 / 0.12); }
+.zeno-remote-type {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--primary);
+  border: 1px solid var(--interactive-border);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.zeno-remote-target { margin-top: 6px; font-size: 12px; color: var(--muted-foreground); }
+.zeno-remote-cmd {
+  display: block;
+  margin-top: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--foreground);
+  background: rgb(255 255 255 / 0.05);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 7px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.zeno-plugin-desc { margin-top: 6px; font-size: 12px; color: var(--muted-foreground); }
+
+/* ---------- chat density & font ---------- */
+body[data-chat-font="small"] #chat-root { font-size: 13px; }
+body[data-chat-font="medium"] #chat-root { font-size: 14px; }
+body[data-chat-font="large"] #chat-root { font-size: 16px; }
+body.zeno-compact #chat-root .chat-message-column { padding-top: 2px; padding-bottom: 2px; }
+
+/* ---------- anexos de mensagem (.md) ---------- */
+.zeno-attachment-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+.zeno-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--interactive-border);
+  border-radius: 10px;
+  background: var(--surface-elevated);
+  color: var(--foreground);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+.zeno-attachment-chip:hover {
+  border-color: var(--primary);
+  background: var(--interactive-hover, var(--surface-elevated));
+}
+.zeno-attachment-name {
+  min-width: 0;
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zeno-attachment-size {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.zeno-attachment-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+.zeno-attachment-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 0.68);
+  backdrop-filter: blur(8px);
+}
+.zeno-attachment-dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(720px, calc(100vw - 34px));
+  height: min(78dvh, 720px);
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 15px;
+  background: #0b0b0b;
+  box-shadow: 0 28px 100px rgb(0 0 0 / 0.6);
+}
+.zeno-attachment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+}
+.zeno-attachment-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #f4f5f8;
+  font-size: 14px;
+  font-weight: 550;
+}
+.zeno-attachment-title > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zeno-attachment-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.zeno-attachment-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--interactive-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+.zeno-attachment-download:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+.zeno-attachment-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 22px 28px;
+  color: #e8e8e8;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.zeno-attachment-body h1,
+.zeno-attachment-body h2,
+.zeno-attachment-body h3 {
+  color: #f4f5f8;
+  margin: 1.2em 0 0.5em;
+}
+.zeno-attachment-body h1 { font-size: 20px; }
+.zeno-attachment-body h2 { font-size: 17px; }
+.zeno-attachment-body h3 { font-size: 15px; }
+.zeno-attachment-body p { margin: 0.5em 0; }
+.zeno-attachment-body ul,
+.zeno-attachment-body ol { margin: 0.5em 0; padding-left: 1.4em; }
+.zeno-attachment-body hr { border: 0; border-top: 1px solid rgb(255 255 255 / 0.12); margin: 1.2em 0; }
+.zeno-attachment-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875em;
+}
+
+/* ---------- composer "+": menu de contexto (modelo / thinking / arquivos) ---------- */
+.zeno-attach-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.zeno-attach-menu,
+.zeno-attach-panel {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 60;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--interactive-border);
+  background: var(--surface-elevated);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 0.45);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(6px);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+  pointer-events: none;
+}
+.zeno-attach-menu { width: 238px; }
+.zeno-attach-panel {
+  width: 278px;
+  max-height: 302px;
+  overflow-y: auto;
+}
+.zeno-attach-wrap:hover:not(.is-open) .zeno-attach-menu,
+.zeno-attach-wrap.is-open .zeno-attach-panel {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.zeno-attach-wrap.is-open .zeno-attach-menu {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+/* ponte invisível: o ponteiro atravessa o vão entre o "+" e o menu */
+.zeno-attach-menu::after,
+.zeno-attach-panel::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 14px;
+}
+.zeno-attach-item,
+.zeno-attach-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--muted-foreground);
+}
+.zeno-attach-item:hover,
+.zeno-attach-option:hover { background: var(--interactive-hover); }
+.zeno-attach-item .remixicon,
+.zeno-attach-option .remixicon { flex-shrink: 0; }
+.zeno-attach-item-text { min-width: 0; flex: 1; }
+.zeno-attach-item-text strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+.zeno-attach-item-text small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.zeno-attach-item-arrow { margin-left: auto; opacity: 0.5; }
+.zeno-attach-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 8px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.zeno-attach-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.zeno-attach-back:hover { background: var(--interactive-hover); color: var(--foreground); }
+.zeno-attach-option.is-selected { background: var(--interactive-hover); }
+.zeno-attach-check { color: var(--primary); }
+.zeno-attach-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 12px;
+  margin: 2px 4px 8px;
+  border: 1px dashed var(--interactive-border);
+  border-radius: 10px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+.zeno-attach-drop strong { font-size: 12px; color: var(--foreground); font-weight: 550; }
+.zeno-attach-drop small { font-size: 11px; }
+.zeno-attach-drop:hover,
+.zeno-attach-drop.is-over { border-color: var(--primary); background: var(--interactive-hover); }
+.zeno-attach-browse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: calc(100% - 8px);
+  margin: 0 4px 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--interactive-border);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+.zeno-attach-browse:hover { background: var(--interactive-hover); }
+.zeno-attach-file-list { display: flex; flex-direction: column; gap: 4px; padding: 0 4px 2px; }
+.zeno-attach-file-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.05);
+  color: var(--foreground);
+  font-size: 12px;
+}
+.zeno-attach-file-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- composer "+": menu radial (leque) modelo / thinking / arquivos ---------- */
+.zeno-attach-menu.zeno-attach-radial {
+  left: calc(50% - 100px);
+  bottom: calc(100% + 2px);
+  width: 200px;
+  height: 140px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.zeno-attach-radial-arrows {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--muted-foreground);
+  opacity: 0.5;
+  overflow: visible;
+  pointer-events: none;
+}
+.zeno-attach-radial-arrows path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.zeno-attach-node {
+  position: absolute;
+  left: calc(var(--node-x, 0px) - 21px);
+  top: calc(var(--node-y, 0px) - 21px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid var(--interactive-border);
+  border-radius: 50%;
+  background: var(--surface-elevated);
+  color: var(--foreground);
+  cursor: pointer;
+  box-shadow: 0 10px 26px rgb(0 0 0 / 0.4);
+  transition: transform 150ms ease, border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+.zeno-attach-node:hover,
+.zeno-attach-node:focus-visible {
+  transform: scale(1.08);
+  border-color: var(--primary);
+  color: var(--primary);
+  outline: none;
+}
+.zeno-attach-node:active { transform: scale(0.98); }
+.zeno-attach-node-label {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 9px;
+  border: 1px solid var(--interactive-border);
+  border-radius: 8px;
+  background: var(--surface-elevated);
+  box-shadow: 0 10px 26px rgb(0 0 0 / 0.4);
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.15;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(4px);
+  transition: opacity 140ms ease, transform 140ms ease, visibility 140ms ease;
+}
+.zeno-attach-node-value {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+.zeno-attach-node:hover .zeno-attach-node-label,
+.zeno-attach-node:focus-visible .zeno-attach-node-label {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+/* mantém o leque acima das bordas do composer em telas estreitas */
+.zeno-attach-node--left .zeno-attach-node-label { left: 0; transform: translateX(0) translateY(4px); }
+.zeno-attach-node--right .zeno-attach-node-label { left: 100%; transform: translateX(-100%) translateY(4px); }
+.zeno-attach-node--left:hover .zeno-attach-node-label,
+.zeno-attach-node--left:focus-visible .zeno-attach-node-label { transform: translateX(0) translateY(0); }
+.zeno-attach-node--right:hover .zeno-attach-node-label,
+.zeno-attach-node--right:focus-visible .zeno-attach-node-label { transform: translateX(-100%) translateY(0); }

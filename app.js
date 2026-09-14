@@ -7,7 +7,12 @@
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   const now = () => new Date();
-  const fmtTime = (d) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const fmtTime = (d) => {
+    const f = state.timeFormat || 'auto';
+    if (f === '12h') return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+    if (f === '24h') return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  };
   const uid = () => Math.random().toString(36).slice(2, 10);
   const relTime = (s) => {
     const ts = s.updatedAt || s.createdAt;
@@ -27,6 +32,46 @@
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
   };
 
+  /* ---------- servidor C (proxy + config) ---------- */
+  const API_BASE = (location.protocol === 'file:') ? 'http://localhost:8080' : '';
+  const api = {
+    async postConfig(cfg) {
+      try { await fetch(`${API_BASE}/api/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) }); } catch {}
+    },
+  };
+
+  /* Carrega config do servidor ANTES do state ser inicializado (sincrono, sem reload).
+     Só aplica se houver conteúdo real; falha silenciosa em file:// ou sem servidor. */
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', `${API_BASE}/api/config`, false);
+    xhr.send(null);
+    if (xhr.status === 200) {
+      const srv = JSON.parse(xhr.responseText);
+      if (srv && typeof srv === 'object' && Object.keys(srv).length) {
+        Object.keys(srv).forEach((k) => { try { localStorage.setItem(k, JSON.stringify(srv[k])); } catch {} });
+      }
+    }
+  } catch {}
+
+  /* Persiste mudancias relevantes no servidor */
+  let _configDebounce = null;
+  const persistServer = () => {
+    clearTimeout(_configDebounce);
+    _configDebounce = setTimeout(() => {
+      const payload = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('oc-clone-')) {
+          try { payload[k] = JSON.parse(localStorage.getItem(k)); } catch { payload[k] = localStorage.getItem(k); }
+        }
+      }
+      api.postConfig(payload);
+    }, 800);
+  };
+  const origSet = LS.set;
+  LS.set = (k, v) => { origSet(k, v); if (k.startsWith('oc-clone-')) persistServer(); };
+
   /* ---------- mock data ---------- */
   const SEED_SESSIONS = [
     {
@@ -35,10 +80,9 @@
       messages: [
         { role: 'user', text: 'Explique o que é um for loop em JavaScript com um exemplo curto de código. Uma linha só.', time: '4:33 PM' },
         {
-          role: 'assistant', time: '4:33 PM', model: 'DeepSeek V4 Pro', agent: 'build', duration: '10.9s',
+          role: 'assistant', time: '4:33 PM', model: 'DeepSeek V4 Pro', agent: 'build', duration: '0:11',
           text: '**For loop** em JavaScript repete um bloco de código enquanto uma condição for verdadeira, com inicialização, condição e incremento.',
           code: { lang: 'js', lines: [['for', 'keyword'], [' (', null], ['let', 'keyword'], [' ', null], ['i', 'variable'], [' =', 'operator'], [' 0', 'number'], [';', 'operator'], [' ', null], ['i', 'variable'], [' <', 'operator'], [' 5', 'number'], [';', 'operator'], [' ', null], ['i', 'variable'], ['++', 'operator'], [') ', null], ['console.log', 'function'], ['(', null], ['i', 'variable'], [')', null], [';', 'operator'], [' // imprime 0 1 2 3 4', 'comment']] },
-          recap: 'For loop repete código enquanto condição verdadeira; inicialização, condição, incremento. Exemplo: `for (let i=0; i<5; i++) console.log(i)` imprime 0 a 4.',
           suggestion: 'Mostre um exemplo de como percorrer um array usando `for` em JavaScript.'
         },
       ],
@@ -221,11 +265,25 @@
 
   const state = {
     theme: 'dark', // 'light' | 'dark'
-    colorMode: 'dark',
+    colorMode: LS.get('oc-clone-color-mode', 'dark'),
     design: LS.get('oc-clone-design', 'Default'),
     model: LS.get('oc-clone-model', 'DeepSeek V4 Pro'),
     voiceMode: false,
     voiceLang: LS.get('oc-clone-voice-lang', (navigator.language || 'pt-BR').startsWith('en') ? 'en-US' : (navigator.language || 'pt-BR').startsWith('es') ? 'es-ES' : 'pt-BR'),
+    voiceProvider: LS.get('oc-clone-voice-provider', 'deepgram'),
+    voiceName: LS.get('oc-clone-voice-name', 'aura-asteria-en'),
+    voiceSttModel: LS.get('oc-clone-voice-stt', 'nova-3'),
+    voiceTtsModel: LS.get('oc-clone-voice-tts', 'aura-asteria-en'),
+    voiceAutoSpeak: LS.get('oc-clone-voice-autospeak', true),
+    appLang: LS.get('oc-clone-app-lang', 'en'),
+    timeFormat: LS.get('oc-clone-time-format', 'auto'),
+    installOrientation: LS.get('oc-clone-install-orientation', 'system'),
+    installAppName: LS.get('oc-clone-install-app-name', 'OpenChamber'),
+    settingsChat: LS.get('oc-clone-settings-chat', { fontSize: 'medium', enterBehavior: 'send', showSuggestions: true, compactMode: false }),
+    settingsNotif: LS.get('oc-clone-settings-notif', { enabled: true, sound: true, mentionOnly: false, desktop: true }),
+    shortcuts: LS.get('oc-clone-shortcuts', { newChat: 'Ctrl+N', palette: 'Ctrl+K', settings: 'Ctrl+,', voice: 'Ctrl+Shift+V' }),
+    remotes: LS.get('oc-clone-remotes', []),
+    plugins: LS.get('oc-clone-plugins', []),
     lightTheme: LS.get('oc-clone-light-theme', 'openchamber-light'),
     darkTheme: LS.get('oc-clone-dark-theme', 'openchamber-dark'),
     sidebarW: LS.get('oc-clone-sbw', 280),
@@ -243,8 +301,8 @@
     traceFilter: 'all',
     liveTrace: null,
     quickActions: LS.get('oc-clone-quick-actions', CHIPS),
-    browserUrl: 'about:blank',
-    browserHistory: ['about:blank'],
+    browserUrl: 'https://lite.duckduckgo.com/lite/',
+    browserHistory: ['https://lite.duckduckgo.com/lite/'],
     browserHistoryIndex: 0,
     modal: null,
     archivedSessions: LS.get('oc-clone-archived-sessions', []),
@@ -261,10 +319,23 @@
   };
 
   if (!['chat', 'memory'].includes(state.workspace)) state.workspace = 'chat';
+  /* Normaliza shapes de builds antigas para os novos blocos de settings. */
+  if (typeof state.settingsChat !== 'object' || !state.settingsChat) state.settingsChat = { fontSize: 'medium', enterBehavior: 'send', showSuggestions: true, compactMode: false };
+  if (typeof state.settingsNotif !== 'object' || !state.settingsNotif) state.settingsNotif = { enabled: true, sound: true, mentionOnly: false, desktop: true };
+  state.shortcuts = { newChat: 'Ctrl+N', palette: 'Ctrl+K', settings: 'Ctrl+,', voice: 'Ctrl+Shift+V', ...(typeof state.shortcuts === 'object' && state.shortcuts ? state.shortcuts : {}) };
+  if (!Array.isArray(state.remotes)) state.remotes = [];
+  if (!Array.isArray(state.plugins)) state.plugins = [];
+  if (!['deepgram', 'openai'].includes(state.voiceProvider)) state.voiceProvider = 'deepgram';
   {
     let sessionsTouched = false;
     state.sessions.forEach((session) => {
       if (!session.createdAt) { session.createdAt = new Date().toISOString(); sessionsTouched = true; }
+      if (!Array.isArray(session.messages)) { session.messages = []; sessionsTouched = true; }
+      /* Garante id estável em toda mensagem: os botões de ação (reverter,
+         bifurcar, copiar) localizam a mensagem pelo id. */
+      session.messages.forEach((message) => {
+        if (!message.id) { message.id = 'msg_' + uid(); sessionsTouched = true; }
+      });
     });
     if (sessionsTouched) LS.set('oc-clone-sessions', state.sessions);
   }
@@ -318,25 +389,60 @@
     LS.set('oc-clone-sessions', state.sessions);
     return session;
   };
-  const BROWSER_HOME = 'about:blank';
+  const BROWSER_HOME = 'https://lite.duckduckgo.com/lite/';
+  /* Domínio com TLD (ex.: site.com, foo.net/x, sub.dominio.site:8080/a) */
+  const TLD_RE = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:[\/?#].*)?$/i;
+  const LOCAL_RE = /^(?:localhost|(?:\d{1,3}\.){3}\d{1,3})(?::\d+)?(?:[\/?#].*)?$/i;
   const resolveBrowserUrl = (value) => {
     const raw = String(value || '').trim();
     if (!raw || raw === 'about:blank') return BROWSER_HOME;
     if (/^https?:\/\//i.test(raw)) return raw;
-    if (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(raw)) return `https://${raw}`;
-    return `https://www.startpage.com/sp/search?query=${encodeURIComponent(raw)}`;
+    if (LOCAL_RE.test(raw)) return `http://${raw}`;
+    if (TLD_RE.test(raw)) return `https://${raw}`;
+    return `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(raw)}`;
+  };
+
+  /* ---------- browser: janela/guia dedicada "ZENO AGENT" ---------- */
+  /* Abre (ou reutiliza) uma janela/guia nomeada e navega nela. O navegador
+     agrupa pela mesma name, entao Go sucessivos reutilizam a mesma guia. */
+  const ZENO_WINDOW = 'ZENO AGENT';
+  let zenoWin = null;
+  const openInZenoWindow = (url) => {
+    try {
+      if (zenoWin && !zenoWin.closed) {
+        zenoWin.location.href = url;
+        zenoWin.focus();
+      } else {
+        /* sem 'noopener': precisamos da referencia para reusar/focar a guia.
+           O navegador agrupa pela mesma name, entao Go seguinte reutiliza a guia. */
+        zenoWin = window.open(url, ZENO_WINDOW);
+      }
+      return true;
+    } catch { return false; }
   };
 
   const navigateBrowser = (value) => {
     const url = resolveBrowserUrl(value);
     state.browserUrl = url;
-    if (window.ZenoNativeBrowser?.available()) window.ZenoNativeBrowser.navigate(url);
+    state.browserHistory = state.browserHistory.slice(0, state.browserHistoryIndex + 1);
+    state.browserHistory.push(url);
+    state.browserHistoryIndex = state.browserHistory.length - 1;
+    openInZenoWindow(url);
     render();
   };
 
   const tplBrowserPanel = () => {
-    if (!window.ZenoNativeBrowser?.available()) return `<div class="native-browser-required"><div>${icon('oc-global', 'remixicon h-6 w-6')}</div><h3>Runtime nativo necessário</h3><p>HTML e iframe não são navegador. Execute <code>ZenoBrowser.exe</code> para usar WebCore real.</p></div>`;
-    return `<div class="micro-browser native-real-browser flex h-full min-h-0 flex-col"><form data-browser-form class="micro-browser-toolbar flex items-center gap-1.5 border-b border-border/70 p-2"><button type="button" data-browser-action="back" class="micro-browser-control" title="Back">${icon('oc-arrow-left', 'remixicon h-3.5 w-3.5')}</button><button type="button" data-browser-action="forward" class="micro-browser-control" title="Forward">${icon('oc-arrow-right', 'remixicon h-3.5 w-3.5')}</button><button type="button" data-browser-action="reload" class="micro-browser-control" title="Reload">${icon('oc-refresh', 'remixicon h-3.5 w-3.5')}</button><button type="button" data-browser-action="home" class="micro-browser-control" title="Home">${icon('oc-home', 'remixicon h-3.5 w-3.5')}</button><div class="micro-browser-address flex min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2">${icon('oc-global', 'remixicon h-3 w-3')}<input data-browser-url value="${esc(state.browserUrl || BROWSER_HOME)}" class="min-w-0 flex-1 bg-transparent py-1.5 text-xs outline-none" placeholder="URL ou pesquisa"></div><button type="submit" class="micro-browser-go rounded-md px-2.5 py-1.5 text-xs font-medium">Go</button></form><div data-native-browser-host class="min-h-0 flex-1 bg-[#090909]"></div></div>`;
+    const toolbar = `<form data-browser-form class="micro-browser-toolbar flex items-center gap-1.5 border-b border-border/70 p-2"><button type="button" data-browser-action="back" class="micro-browser-control" title="Back">${icon('oc-arrow-left', 'remixicon h-3.5 w-3.5')}</button><button type="button" data-browser-action="forward" class="micro-browser-control" title="Forward">${icon('oc-arrow-right', 'remixicon h-3.5 w-3.5')}</button><button type="button" data-browser-action="reload" class="micro-browser-control" title="Reload">${icon('oc-refresh', 'remixicon h-3.5 w-3.5')}</button><button type="button" data-browser-action="home" class="micro-browser-control" title="Home">${icon('oc-home', 'remixicon h-3.5 w-3.5')}</button><div class="micro-browser-address flex min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2">${icon('oc-global', 'remixicon h-3 w-3')}<input data-browser-url value="${esc(state.browserUrl || BROWSER_HOME)}" class="min-w-0 flex-1 bg-transparent py-1.5 text-xs outline-none" placeholder="URL ou pesquisa"></div><button type="submit" class="micro-browser-go rounded-md px-2.5 py-1.5 text-xs font-medium">Go</button></form>`;
+    return `<div class="micro-browser flex h-full min-h-0 flex-col">${toolbar}
+      <div class="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+        <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-border/70 bg-[var(--surface-elevated)]">${icon('oc-global', 'remixicon h-7 w-7 text-muted-foreground')}</div>
+        <div>
+          <h3 class="text-sm font-medium text-foreground">Guia ZENO AGENT</h3>
+          <p class="mx-auto mt-1 max-w-[34ch] text-xs leading-relaxed text-muted-foreground">Digite uma URL e clique em Go: o site abre numa guia do seu navegador com o nome <strong>ZENO AGENT</strong>. Os Go seguintes reutilizam a mesma guia.</p>
+        </div>
+        <button type="button" data-action="open-zeno-window" class="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:opacity-90">${icon('oc-global', 'remixicon h-4 w-4')}Abrir guia ZENO AGENT</button>
+        <p class="text-[11px] text-muted-foreground/70">Dica: se o navegador bloquear o pop-up, permita pop-ups para este site.</p>
+      </div></div>`;
   };
 
   /* ---------- theme ---------- */
@@ -362,7 +468,10 @@
   const themeList = (variant) => Object.entries(THEME_VARIANTS).filter(([, v]) => v[1] === variant).map(([id, v]) => ({ id, name: v[0] }));
 
   const applyTheme = () => {
-    if (!localStorage.getItem('oc-clone-color-mode')) { state.colorMode = 'dark'; LS.set('oc-clone-color-mode', 'dark'); }
+    if (!['system', 'light', 'dark'].includes(state.colorMode)) {
+      state.colorMode = LS.get('oc-clone-color-mode', 'dark');
+      if (!['system', 'light', 'dark'].includes(state.colorMode)) state.colorMode = 'dark';
+    }
     const root = document.documentElement;
     const isDark = state.colorMode === 'dark' || (state.colorMode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     const active = isDark ? state.darkTheme : state.lightTheme;
@@ -461,69 +570,47 @@
   };
 
   /* ---------- tools ---------- */
+  /* Estilo Claude Code: label bold + comando inline, sem caixa; output em bloco com borda ao expandir */
   const tplToolRow = (tool, toolKey, phase) => {
     const expanded = !!state.expandedTools[toolKey];
     const typing = phase === 'typing-cmd';
     const shownCmd = typing ? tool.cmd.slice(0, Math.max(6, Math.round(tool.cmd.length * (tool.progress || 0)))) : tool.cmd;
-    const iconNow = expanded ? 'oc-arrow-down-s' : (typing ? 'oc-terminal-box' : 'oc-terminal-box');
     return `
-    <div class="group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl items-center cursor-pointer" role="button" tabindex="0" data-tool-key="${toolKey}">
-      <div class="flex gap-1.5 items-center flex-shrink-0">
-        <div class="relative h-5 w-3.5 flex-shrink-0 cursor-pointer">
-          <div class="absolute inset-0 flex items-center justify-center transition-opacity ${expanded || !typing ? 'opacity-0' : ''}" style="color: var(--tools-icon);">${icon('oc-terminal-box', 'remixicon h-3.5 w-3.5 flex-shrink-0')}</div>
-          <div class="absolute inset-0 transition-opacity flex items-center justify-center ${expanded ? 'opacity-100' : 'opacity-0 group-hover/tool:opacity-100'}">${icon(iconNow, 'remixicon h-3.5 w-3.5')}</div>
-        </div>
-        <div class="flex items-center gap-2 min-w-0 flex-1"><span class="transition-opacity duration-200 typography-meta font-medium !text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal flex-shrink-0" title="${esc(tool.title)}" style="color: var(--tools-title);">${esc(tool.title)}</span></div>
-        ${tool.duration ? `<span class="flex-shrink-0 tabular-nums text-muted-foreground/80 typography-meta !text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal">${esc(tool.duration)}</span>` : ''}
+    <div class="py-1">
+      <div class="group/tool flex items-baseline gap-2 cursor-pointer" role="button" tabindex="0" data-tool-key="${toolKey}">
+        <span class="flex-shrink-0 text-[13px] font-semibold text-foreground" title="${esc(tool.title)}">${esc(tool.title)}</span>
+        <span class="min-w-0 flex-1 truncate text-[13px] leading-6 text-muted-foreground" title="${esc(tool.cmd)}">${esc(shownCmd)}${typing ? '<span class="tool-caret"></span>' : ''}</span>
+        ${tool.duration ? `<span class="flex-shrink-0 text-[12px] tabular-nums text-muted-foreground/60">${esc(tool.duration)}</span>` : ''}
       </div>
-      <div class="flex items-center gap-1 flex-1 min-w-0 typography-meta !text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal" style="color: var(--tools-description);">
-        <div class="flex items-center gap-1 flex-1 min-w-0"><span title="${esc(tool.cmd)}" class="inline-block whitespace-pre align-baseline min-w-0 truncate" style="color: var(--tools-description);">${esc(shownCmd)}${typing ? '<span class="tool-caret"></span>' : ''}</span></div>
-      </div>
-    </div>
-    ${expanded ? `
-    <div aria-hidden="false" style="height: auto; overflow: visible; overflow-anchor: none;">
-      <div class="relative ml-2 pl-3">
-        <span aria-hidden="true" class="pointer-events-none absolute left-0 top-px bottom-0 w-px" style="background-color: var(--tools-border);"></span>
-        <div class="relative pr-2 pb-2 pt-2 space-y-2 pl-4">
-          <div class="my-1">
-            <div class="w-full min-w-0 flex-none overflow-hidden">
-              <div data-scrollable="true" class="tool-output-surface w-full min-w-0 max-h-60 overflow-auto tool-input-surface p-0 rounded-none" data-orientation="vertical" data-scroll-shadow="true" style="--scroll-shadow-size: 48px;">
-                <div class="w-full min-w-0"><pre class="tool-input-text whitespace-pre-wrap break-words">${tool.output.map((l) => mdHighlight(l, 'text')).join('\n')}</pre></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>` : ''}`;
+      ${expanded ? `
+      <div class="mt-1.5 rounded-lg border border-border/70 bg-[var(--surface-elevated)] px-3.5 py-3">
+        <pre class="whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-foreground/85">$ ${esc(tool.cmd)}\n\n${tool.output.map((l) => mdHighlight(l, 'text')).join('\n')}</pre>
+      </div>` : ''}
+    </div>`;
   };
 
+  /* Bloco "Explorado N leituras, M pesquisas" — resumo colapsável do raciocínio */
   const tplThinkingBlock = (m) => {
     const key = 'think_' + m.id;
     const expanded = !!state.expandedTools[key];
+    const tools = m.tools || [];
+    const isSearch = (t) => /select-string|grep|rg\b|findstr|search|where-object|startpage|duckduckgo/i.test(t.cmd || '');
+    const reads = tools.filter((t) => !isSearch(t)).length;
+    const searches = tools.length - reads;
+    const parts = [];
+    if (reads) parts.push(`${reads} ${reads === 1 ? 'leitura' : 'leituras'}`);
+    if (searches) parts.push(`${searches} ${searches === 1 ? 'pesquisa' : 'pesquisas'}`);
+    const summary = parts.join(', ') || `${tools.length || 1} ${tools.length === 1 ? 'passo' : 'passos'}`;
     return `
-    <div class="group/tool flex gap-1.5 pr-2 pl-px py-1.5 rounded-xl items-center cursor-pointer" role="button" tabindex="0" data-tool-key="${key}">
-      <div class="flex gap-1.5 items-center flex-shrink-0">
-        <div class="relative h-5 w-3.5 flex-shrink-0 cursor-pointer">
-          <div class="absolute inset-0 flex items-center justify-center transition-opacity ${expanded ? 'opacity-0' : ''}" style="color: var(--tools-icon);">${icon('oc-brain-ai-3', 'remixicon h-3.5 w-3.5 flex-shrink-0')}</div>
-          <div class="absolute inset-0 transition-opacity flex items-center justify-center ${expanded ? 'opacity-100' : 'opacity-0 group-hover/tool:opacity-100'}">${icon('oc-arrow-down-s', 'remixicon h-3.5 w-3.5')}</div>
-        </div>
-        <div class="flex items-center gap-2 min-w-0 flex-1"><span class="transition-opacity duration-200 typography-meta font-medium !text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal flex-shrink-0" style="color: var(--tools-title);">Thought process</span></div>
+    <div class="py-1">
+      <div class="group/tool flex items-center gap-1.5 cursor-pointer" role="button" tabindex="0" data-tool-key="${key}">
+        <span class="text-[13px] font-semibold text-foreground">Explorado</span>
+        <span class="text-[13px] text-muted-foreground">${esc(summary)}</span>
+        <span class="text-muted-foreground/60 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}">${icon('oc-arrow-right-s', 'remixicon h-3.5 w-3.5')}</span>
       </div>
-      <div class="flex items-center gap-1 flex-1 min-w-0 typography-meta !text-[length:var(--text-meta)] !leading-5 sm:!leading-6 tracking-normal" style="color: var(--tools-description);">
-        <div class="flex items-center gap-1 flex-1 min-w-0"><span class="inline-block whitespace-pre align-baseline min-w-0 truncate">${esc(m.thinking)}</span></div>
-      </div>
-    </div>
-    ${expanded ? `
-    <div aria-hidden="false" style="height: auto; overflow: visible; overflow-anchor: none;">
-      <div class="relative ml-2 pl-3">
-        <span aria-hidden="true" class="pointer-events-none absolute left-0 top-px bottom-0 w-px" style="background-color: var(--tools-border);"></span>
-        <div class="relative pr-2 pb-2 pt-2 space-y-2 pl-4">
-          <div class="relative flex flex-col gap-3 rounded-lg border border-border/60 bg-[var(--surface-elevated)] p-3">
-            <div class="text-sm leading-relaxed text-foreground/85" style="white-space: pre-wrap;">${esc(m.thinking)}</div>
-          </div>
-        </div>
-      </div>
-    </div>` : ''}`;
+      ${expanded ? `
+      <div class="mt-1.5 pl-0.5 text-[13px] leading-relaxed text-muted-foreground" style="white-space: pre-wrap;">${esc(m.thinking)}</div>` : ''}
+    </div>`;
   };
 
   /* ---------- templates: shell ---------- */
@@ -635,38 +722,33 @@
       </div>
     </aside>`;
 
-  const tplNav = () => {
-    const s = activeSession();
-    if (state.workspace === 'chat' && (!s || !s.messages.length)) return '';
-    return `
-    <nav aria-label="Panel surfaces" class="flex h-full w-11 flex-shrink-0 flex-col items-center gap-1 bg-background py-2">
-      ${Object.entries(PANELS).map(([label, [ic]]) => {
-        const on = state.panel === label;
-        const extra = ' panel-' + label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-        return `
-      <div class="relative"><button type="button" role="button" tabindex="0" data-panel-btn="${label}" aria-label="${label}" title="${label}" aria-pressed="${on}" class="flex h-9 w-9 touch-none select-none items-center justify-center rounded-md transition-colors ${on ? 'text-foreground bg-interactive-hover' : 'text-muted-foreground hover:text-foreground'}${extra}">${icon(ic, 'remixicon h-[18px] w-[18px]')}</button></div>`;
-      }).join('')}
-    </nav>`;
-  };
 
   /* ---------- templates: composer ---------- */
   const getQuickActions = () => {
     const actions = state.quickActions;
-    return Array.isArray(actions) && actions.every((item) => Array.isArray(item) && item.length >= 2)
+    const base = Array.isArray(actions) && actions.every((item) => Array.isArray(item) && item.length >= 2)
       ? actions
       : CHIPS;
+    const pluginChips = activePluginButtons().map((b) => [b.icon || 'oc-puzzle-2', b.label || b.action || b.id]);
+    return [...base, ...pluginChips].slice(0, 18);
   };
 
   const tplComposer = (big, session) => {
-    const suggestion = session && session.messages.length ? session.messages[session.messages.length - 1].suggestion : null;
+    const suggestion = state.settingsChat.showSuggestions === false ? null : session && session.messages.length ? session.messages[session.messages.length - 1].suggestion : null;
     const project = activeProject();
-    const chatInput = () => `
+    const chatInput = () => {
+      /* Modo voz: sem pop-up — as ondas aparecem aqui, na caixa do composer. */
+      if (state.voiceMode) return `
+      <div data-composer-shell="true" class="flex flex-col relative overflow-visible border border-border/80 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)] focus-within:ring-1 focus-within:ring-primary/50" style="border-radius: var(--radius-xl); background-color: var(--surface-elevated);">
+        ${tplVoiceInline()}
+      </div>`;
+      return `
       <div data-composer-shell="true" class="flex flex-col relative overflow-visible border border-border/80 shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)] focus-within:ring-1 focus-within:ring-primary/50" style="border-radius: var(--radius-xl); background-color: var(--surface-elevated);">
         <div class="relative flex flex-col">
           <div class="overflow-hidden">
             <div class="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10"></div>
             <div class="relative overflow-hidden">
-              <div data-testid="chat-input" data-chat-input="true" class="composer-editor w-full [&_.cm-editor]:h-full min-h-[52px] px-3 relative z-10 pt-4 pb-2 typography-markdown md:typography-ui-label">
+              <div data-testid="chat-input" data-chat-input="true" class="composer-editor w-full [&_.cm-editor]:h-full min-h-[44px] px-3 relative z-10 pt-2.5 pb-1 typography-markdown md:typography-ui-label">
                 <div class="cm-editor ͼ1 ͼ2 ͼ4 ͼp ͼo">
                   <div class="cm-scroller" style="max-height: 180px;">
                     <div spellcheck="false" autocorrect="off" autocapitalize="none" writingsuggestions="false" translate="no" contenteditable="true" style="tab-size: 4;" class="cm-content cm-lineWrapping" role="textbox" aria-multiline="true" aria-placeholder="Digite uma instrução para o Zeno Agent" data-composer-input><div class="cm-line"><img class="cm-widgetBuffer" aria-hidden="true"><span class="cm-placeholder" data-animated-placeholder aria-hidden="true" contenteditable="false" style="pointer-events: none;"></span><br></div></div>
@@ -675,9 +757,27 @@
               </div>
             </div>
           </div>
-          <div class="bg-transparent flex-shrink-0 px-2.5 py-1.5 flex items-center justify-between gap-1" data-chat-input-footer="true" style="border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl);">
+          <div class="bg-transparent flex-shrink-0 px-2.5 py-1 flex items-center justify-between gap-1" data-chat-input-footer="true" style="border-bottom-left-radius: var(--radius-xl); border-bottom-right-radius: var(--radius-xl);">
             <div class="flex items-center gap-1">
-              <button type="button" data-action="attach" class="zeno-icon-btn" title="Adicionar anexo" aria-label="Adicionar anexo">${icon('oc-add-circle', 'remixicon h-[18px] w-[18px]')}</button>
+              <div class="zeno-attach-wrap" data-attach-wrap>
+                <button type="button" data-action="attach" class="zeno-icon-btn" title="Adicionar contexto" aria-label="Adicionar contexto" aria-haspopup="menu">${icon('oc-add-circle', 'remixicon h-[18px] w-[18px]')}</button>
+                <div class="zeno-attach-menu zeno-attach-radial" role="menu" aria-label="Adicionar contexto">
+                  <svg class="zeno-attach-radial-arrows" viewBox="0 0 200 140" aria-hidden="true" focusable="false">
+                    <defs>
+                      <marker id="zeno-attach-arrowhead" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+                        <path d="M0 1.2 8 5 0 8.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                      </marker>
+                    </defs>
+                    <path d="M95.1 130.6 59.2 77.9" marker-end="url(#zeno-attach-arrowhead)" />
+                    <path d="M100 129 100 65" marker-end="url(#zeno-attach-arrowhead)" />
+                    <path d="M104.9 130.6 140.8 77.9" marker-end="url(#zeno-attach-arrowhead)" />
+                  </svg>
+                  <button type="button" role="menuitem" class="zeno-attach-node zeno-attach-node--left" data-attach-mode="model" style="--node-x:44px;--node-y:58px" aria-label="Modelo" title="Modelo">${icon('oc-robot', 'remixicon h-[18px] w-[18px]')}<span class="zeno-attach-node-label">Modelo<small class="zeno-attach-node-value">${esc(state.model)}</small></span></button>
+                  <button type="button" role="menuitem" class="zeno-attach-node zeno-attach-node--top" data-attach-mode="thinking" style="--node-x:100px;--node-y:40px" aria-label="Thinking" title="Thinking">${icon('oc-brain-ai-3', 'remixicon h-[18px] w-[18px]')}<span class="zeno-attach-node-label">Thinking<small class="zeno-attach-node-value">${esc(state.design)}</small></span></button>
+                  <button type="button" role="menuitem" class="zeno-attach-node zeno-attach-node--right" data-attach-mode="files" style="--node-x:156px;--node-y:58px" aria-label="Arquivos" title="Arquivos">${icon('oc-file-add', 'remixicon h-[18px] w-[18px]')}<span class="zeno-attach-node-label">Arquivos<small class="zeno-attach-node-value">Adicionar ao contexto</small></span></button>
+                </div>
+                <div class="zeno-attach-panel" data-attach-panel hidden></div>
+              </div>
             </div>
             <div class="flex items-center gap-1">
               <span data-dictation-label aria-live="polite"></span>
@@ -688,6 +788,7 @@
           </div>
         </div>
       </div>`;
+    };
 
     if (big) {
       return `
@@ -723,11 +824,11 @@
   };
 
   const tplUserMsg = (m) => `
-    <div class="group w-full pt-4 pb-0" data-message-id="${m.id || uid()}" data-message-role="user">
+    <div class="group w-full pt-2 pb-0" data-message-id="${m.id || uid()}" data-message-role="user">
       <div class="chat-message-column relative">
         <div class="relative flex justify-end group/user-shell">
           <div class="max-w-[85%]">
-            <div class="px-5 py-3 shadow-none border border-primary/5" style="background-color: var(--chat-user-message-bg); border-bottom-right-radius: var(--radius-sm);">
+            <div class="px-4 py-2 shadow-none border border-primary/5" style="background-color: var(--chat-user-message-bg); border-bottom-right-radius: var(--radius-sm);">
               <div class="relative w-full group/message" style="contain: layout; transform: translateZ(0px);">
                 <div class="text-foreground/90 text-base overflow-x-hidden overflow-y-hidden">
                   <div class="relative">
@@ -742,11 +843,12 @@
                 </div>
               </div>
             </div>
+            ${(m.attachments && m.attachments.length) ? `<div class="zeno-attachment-list" data-message-id="${m.id || ''}">${m.attachments.map((a, i) => `<button type="button" class="zeno-attachment-chip" data-attachment-index="${i}" title="Abrir ${esc(a.name)}">${icon('oc-file-text', 'remixicon h-3.5 w-3.5')}<span class="zeno-attachment-name">${esc(a.name)}</span><span class="zeno-attachment-size">${esc(a.size || 'md')}</span></button>`).join('')}</div>` : ''}
             <div class="group/user-actions flex h-8 items-start justify-end pt-2">
               <div class="flex items-center justify-end gap-1 translate-x-0 pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-hover/user-shell:pointer-events-auto group-hover/user-shell:opacity-100">
                 <span class="mr-1 flex items-center gap-1 text-sm tabular-nums text-muted-foreground/60" aria-label="Message time: ${m.time || fmtTime(now())}">${icon('oc-time', 'remixicon h-3.5 w-3.5')}<span class="message-footer__label">${m.time || fmtTime(now())}</span></span>
-                ${[['oc-arrow-go-back', 'Revert to this message'], ['oc-git-branch', 'Fork from this message'], ['oc-pushpin-2', 'Pin into context (survives compaction)'], ['oc-file-copy', 'Copy message text']].map(([i, l]) => `
-                <button data-slot="tooltip-trigger" class="group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 size-9 h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground" type="button" aria-label="${l}">${icon(i, 'remixicon h-3 w-3')}</button>`).join('')}
+                ${[['oc-arrow-go-back', 'Revert to this message', 'revert'], ['oc-git-branch', 'Fork from this message', 'branch'], ['oc-file-copy', 'Copy message text', 'copy']].map(([i, l, a]) => `
+                <button data-slot="tooltip-trigger" data-msg-action="${a}" class="group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 size-9 h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground" type="button" title="${l}" aria-label="${l}">${icon(i, 'remixicon h-3 w-3')}</button>`).join('')}
               </div>
             </div>
           </div>
@@ -793,17 +895,15 @@
                 </div>
               </div>
             </div>
-            ${m.recap ? `<div class="chat-message-column" style="padding-inline:0"><div aria-label="Session recap"><span class="typography-meta text-muted-foreground/70 line-clamp-2"><span class="italic text-muted-foreground/50">Recap: </span>${esc(m.recap)}</span></div></div>` : ''}
             <div class="mt-2 mb-1 flex flex-wrap items-center justify-start gap-x-3 gap-y-1.5" style="container: message-footer / inline-size;">
               <div class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-muted-foreground/60">
-                <span class="flex min-w-0 items-center gap-1.5"><img alt="" class="h-3.5 w-3.5 flex-shrink-0" src="https://models.dev/logos/opencode-go.svg" style="filter: brightness(0.9) contrast(1.1);"><span class="truncate">${esc(m.model)}</span></span>
+                <span class="truncate">${esc(m.model)}</span>
                 <span class="flex items-center gap-1">${icon('oc-ai-agent', 'remixicon h-3.5 w-3.5 flex-shrink-0')}<span class="message-footer__label">${esc(m.agent)}</span></span>
-                <span class="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">${icon('oc-hourglass', 'remixicon h-3.5 w-3.5')}<span class="message-footer__label">${esc(m.duration)}</span></span>
                 <span class="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1" aria-label="Message time: ${m.time}">${icon('oc-time', 'remixicon h-3.5 w-3.5')}<span class="message-footer__label">${m.time}</span></span>
               </div>
               <div class="flex items-center gap-1.5 pointer-events-none opacity-0 transition-opacity duration-150 focus-within:pointer-events-auto focus-within:opacity-100 group-hover/message:pointer-events-auto group-hover/message:opacity-100" data-message-action-group="true">
-                ${[['oc-file-copy', 'Copy message text'], ['oc-image-download', 'Download as image'], ['oc-booklet', 'Export markdown'], ['oc-pushpin-2', 'Pin into context'], ['oc-chat-new', 'Continue in new session']].map(([i, l]) => `
-                <button data-slot="tooltip-trigger" class="group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 size-9 h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground" type="button" aria-label="${l}">${icon(i, 'remixicon h-3.5 w-3.5')}</button>`).join('')}
+                ${[['oc-file-copy', 'Copy message text', 'copy'], ['oc-image-download', 'Download as image', 'download-image'], ['oc-booklet', 'Export markdown', 'export-md'], ['oc-chat-new', 'Continue in new session', 'branch']].map(([i, l, a]) => `
+                <button data-slot="tooltip-trigger" data-msg-action="${a}" class="group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 size-9 h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground" type="button" title="${l}" aria-label="${l}">${icon(i, 'remixicon h-3.5 w-3.5')}</button>`).join('')}
               </div>
             </div>
           </div>
@@ -818,8 +918,7 @@
           <div class="relative w-full group/message" style="contain: layout; transform: translateZ(0px);">
             <div class="flex items-center gap-2 py-1.5">
               <span class="oc-spinner" aria-hidden="true"></span>
-              <img alt="" class="h-3.5 w-3.5 flex-shrink-0" src="https://models.dev/logos/opencode-go.svg" style="filter: brightness(0.9) contrast(1.1);">
-              <span class="truncate text-sm text-muted-foreground">DeepSeek V4 Pro</span>
+              <span class="truncate text-sm text-muted-foreground">${esc(state.model)}</span>
               <span class="flex items-center gap-1 text-sm text-muted-foreground/60">${icon('oc-ai-agent', 'remixicon h-3.5 w-3.5')}<span class="message-footer__label">build</span></span>
               <span class="text-sm text-muted-foreground/70 italic">thinking…</span>
             </div>
@@ -1173,6 +1272,24 @@
       </button>
     </div>`;
 
+  /* ---------- settings: toggles & fields ---------- */
+  const tplToggleRow = (label, desc, on, attr) => `
+    <button type="button" ${attr} aria-pressed="${on ? 'true' : 'false'}" class="flex w-full items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2.5 text-left transition-colors hover:border-border">
+      <span class="min-w-0"><span class="block text-sm text-foreground">${esc(label)}</span>${desc ? `<span class="block text-xs text-muted-foreground">${esc(desc)}</span>` : ''}</span>
+      <span class="zeno-toggle ${on ? 'is-on' : ''}" aria-hidden="true"><span></span></span>
+    </button>`;
+
+  const tplSettingsField = (label, inner) => `
+    <div>
+      <div class="mb-1.5 typography-meta font-medium text-muted-foreground">${esc(label)}</div>
+      ${inner}
+    </div>`;
+
+  const tplNativeSelect = (attr, value, options) => `
+    <select ${attr} class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-2 text-sm text-foreground outline-none" style="background: var(--background);">
+      ${options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+    </select>`;
+
   const tplSettingsSection = () => {
     const sec = state.settingsSection;
     if (sec === 'Appearance') {
@@ -1214,11 +1331,11 @@
                 <div class="space-y-3">
                   <div>
                     <div class="mb-1.5 typography-meta text-muted-foreground">Language</div>
-                    ${tplSettingsSelect('Select language', 'English', [], 'lang')}
+                    ${tplSettingsSelect('Select language', state.appLang === 'pt' ? 'Português' : state.appLang === 'es' ? 'Español' : 'English', [], 'lang')}
                   </div>
                   <div>
                     <div class="mb-1.5 typography-meta text-muted-foreground">Time Format</div>
-                    ${tplSettingsSelect('Select time format', 'Auto', [], 'timefmt')}
+                    ${tplSettingsSelect('Select time format', state.timeFormat === '12h' ? '12h' : state.timeFormat === '24h' ? '24h' : 'Auto', [], 'timefmt')}
                   </div>
                 </div>
               </div>
@@ -1231,7 +1348,7 @@
                   </div>
                   <div>
                     <div class="mb-1.5 typography-meta text-muted-foreground">Install Orientation</div>
-                    ${tplSettingsSelect('Select orientation', 'Follow system', [], 'orientation')}
+                    ${tplSettingsSelect('Select orientation', state.installOrientation === 'portrait' ? 'Portrait' : state.installOrientation === 'landscape' ? 'Landscape' : 'Follow system', [], 'orientation')}
                   </div>
                 </div>
               </div>
@@ -1255,6 +1372,164 @@
             ${tplSettingsSelect('Select startup behavior', 'Continue last session', [], 'startup')}
           </div>
         </div>
+      </div>`;
+    }
+    if (sec === 'Chat') {
+      const c = state.settingsChat;
+      return `
+      <div class="px-6 py-5">
+        <h2 class="typography-h3 text-foreground">Chat</h2>
+        <p class="typography-meta mt-1 text-muted-foreground">Comportamento do composer e das mensagens.</p>
+        <div class="mt-6 max-w-[28rem] space-y-4">
+          ${tplSettingsField('Font size', tplNativeSelect('data-set-field="chat.fontSize"', c.fontSize, [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']]))}
+          ${tplSettingsField('Enter behavior', tplNativeSelect('data-set-field="chat.enterBehavior"', c.enterBehavior, [['send', 'Enter envia · Shift+Enter quebra linha'], ['newline', 'Enter quebra linha · Ctrl+Enter envia']]))}
+          ${tplToggleRow('Follow-up suggestions', 'Mostra a pílula de sugestão abaixo do composer.', c.showSuggestions, 'data-set-toggle="chat.showSuggestions"')}
+          ${tplToggleRow('Compact mode', 'Mensagens mais densas, menos respiro.', c.compactMode, 'data-set-toggle="chat.compactMode"')}
+        </div>
+      </div>`;
+    }
+    if (sec === 'Notifications') {
+      const n = state.settingsNotif;
+      return `
+      <div class="px-6 py-5">
+        <h2 class="typography-h3 text-foreground">Notifications</h2>
+        <p class="typography-meta mt-1 text-muted-foreground">Quando o Zeno deve chamar sua atenção.</p>
+        <div class="mt-6 max-w-[28rem] space-y-2.5">
+          ${tplToggleRow('Enable notifications', 'Avisar quando uma resposta terminar.', n.enabled, 'data-set-toggle="notif.enabled"')}
+          ${tplToggleRow('Sound', 'Tocar um som junto do aviso.', n.sound, 'data-set-toggle="notif.sound"')}
+          ${tplToggleRow('Mentions only', 'Só avisar quando a resposta pedir sua ação.', n.mentionOnly, 'data-set-toggle="notif.mentionOnly"')}
+          ${tplToggleRow('Desktop banner', 'Usar notificação do sistema operacional.', n.desktop, 'data-set-toggle="notif.desktop"')}
+          <button type="button" data-action="notif-test" class="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground transition-colors">Testar notificação</button>
+        </div>
+      </div>`;
+    }
+    if (sec === 'Shortcuts') {
+      const s = state.shortcuts;
+      const row = (label, key) => `
+        <label class="flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2">
+          <span class="text-sm text-foreground">${esc(label)}</span>
+          <input data-shortcut="${key}" value="${esc(s[key] || '')}" spellcheck="false" autocomplete="off"
+            class="h-7 w-36 rounded-md border border-border bg-transparent px-2 text-right font-mono text-xs text-foreground outline-none">
+        </label>`;
+      return `
+      <div class="px-6 py-5">
+        <h2 class="typography-h3 text-foreground">Shortcuts</h2>
+        <p class="typography-meta mt-1 text-muted-foreground">Clique num atalho e digite a nova combinação.</p>
+        <div class="mt-6 max-w-[28rem] space-y-2.5">
+          ${row('New chat', 'newChat')}
+          ${row('Command palette', 'palette')}
+          ${row('Settings', 'settings')}
+          ${row('Voice mode', 'voice')}
+          <button type="button" data-action="shortcuts-reset" class="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground transition-colors">Restaurar padrão</button>
+        </div>
+      </div>`;
+    }
+    if (sec === 'Voice') {
+      return `
+      <div class="px-6 py-5">
+        <h2 class="typography-h3 text-foreground">Voice</h2>
+        <p class="typography-meta mt-1 text-muted-foreground">Fala com o Zeno: Deepgram é o padrão, OpenAI é a opção.</p>
+        <div class="mt-6 max-w-[28rem] space-y-4">
+          ${tplSettingsField('Provider', tplNativeSelect('data-set-field="voice.provider"', state.voiceProvider, [['deepgram', 'Deepgram (padrão)'], ['openai', 'OpenAI']]))}
+          ${tplSettingsField('Agent language', tplNativeSelect('data-set-field="voice.lang"', state.voiceLang, [['pt-BR', 'Português (BR)'], ['en-US', 'English (US)'], ['es-ES', 'Español']]))}
+          ${tplSettingsField('Voice', tplNativeSelect('data-set-field="voice.name"', state.voiceName, [['aura-asteria-en', 'Aura Asteria (Deepgram)'], ['aura-luna-en', 'Aura Luna (Deepgram)'], ['aura-orion-en', 'Aura Orion (Deepgram)'], ['alloy', 'Alloy (OpenAI)'], ['echo', 'Echo (OpenAI)'], ['shimmer', 'Shimmer (OpenAI)']]))}
+          ${tplSettingsField('Speech-to-text model', tplNativeSelect('data-set-field="voice.stt"', state.voiceSttModel, [['nova-3', 'nova-3 (Deepgram)'], ['nova-2', 'nova-2 (Deepgram)'], ['whisper-1', 'whisper-1 (OpenAI)']]))}
+          ${tplSettingsField('Text-to-speech model', tplNativeSelect('data-set-field="voice.tts"', state.voiceTtsModel, [['aura-asteria-en', 'Aura (Deepgram)'], ['tts-1', 'tts-1 (OpenAI)'], ['tts-1-hd', 'tts-1-hd (OpenAI)']]))}
+          ${tplToggleRow('Auto-speak', 'O agente começa a falar automaticamente ao entrar em voz.', state.voiceAutoSpeak !== false, 'data-set-toggle="voice.autoSpeak"')}
+          <div>
+            <div class="mb-1.5 typography-meta font-medium text-muted-foreground">OpenAI API key (opcional, só para provider OpenAI)</div>
+            <input data-set-field="voice.openaiKey" type="password" value="${esc(LS.get('oc-clone-voice-openai-key', ''))}" placeholder="sk-…" autocomplete="off"
+              class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">
+          </div>
+          <button type="button" data-action="voice-test" class="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground transition-colors">${icon('oc-mic', 'remixicon h-3.5 w-3.5')}Testar voz</button>
+        </div>
+      </div>`;
+    }
+    if (sec === 'Projects') {
+      const blocks = state.projects.length ? state.projects.map((p) => {
+        const chats = projectSessions(p.id).length;
+        return `<div class="zeno-setting-block" data-project-block="${p.id}">
+          <div class="zeno-setting-block-head">
+            <input data-project-name="${p.id}" value="${esc(p.name)}" spellcheck="false" autocomplete="off" aria-label="Project name"
+              class="zeno-setting-block-title">
+            <span class="zeno-setting-block-meta">${chats} chat${chats === 1 ? '' : 's'}</span>
+          </div>
+          <div class="zeno-setting-block-folders">
+            ${(p.folders || []).map((f, i) => `<span class="project-folder-chip"><span class="project-folder-name">${esc(f)}</span><button type="button" data-project-rmfolder="${p.id}" data-folder-index="${i}" aria-label="Remove folder">${icon('oc-close', 'remixicon h-3 w-3')}</button></span>`).join('') || '<span class="project-folder-empty">Sem pastas.</span>'}
+          </div>
+          <div class="zeno-setting-block-row">
+            <input data-project-addfolder="${p.id}" placeholder="Adicionar pasta…" spellcheck="false" autocomplete="off" class="h-7 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-xs text-foreground outline-none">
+            <button type="button" data-project-newchat="${p.id}" class="zeno-mini-btn">Novo chat</button>
+            <button type="button" data-project-delete="${p.id}" class="zeno-mini-btn is-danger">Excluir</button>
+          </div>
+        </div>`;
+      }).join('') : '<div class="py-6 text-center text-sm text-muted-foreground">Nenhum projeto ainda. Crie o primeiro abaixo.</div>';
+      return `
+      <div class="px-6 py-5">
+        <h2 class="typography-h3 text-foreground">Projects</h2>
+        <p class="typography-meta mt-1 text-muted-foreground">Blocos editáveis: renomeie, ajuste pastas e abra chats.</p>
+        <div class="mt-6 max-w-[34rem] space-y-3">${blocks}</div>
+        <button type="button" data-action="project-create-inline" class="mt-4 inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground transition-colors">${icon('oc-add', 'remixicon h-3.5 w-3.5')}Novo projeto</button>
+      </div>`;
+    }
+    if (sec === 'Remote Instances') {
+      const cards = state.remotes.length ? state.remotes.map((r) => `
+        <div class="zeno-setting-block" data-remote-block="${r.id}">
+          <div class="zeno-setting-block-head">
+            <input data-remote-name="${r.id}" value="${esc(r.name)}" spellcheck="false" autocomplete="off" aria-label="Remote name" class="zeno-setting-block-title">
+            <span class="zeno-remote-type">${esc(r.type.toUpperCase())}</span>
+          </div>
+          <div class="zeno-remote-target">${esc(r.type === 'colab' ? r.url : `${r.user}@${r.host}:${r.port}`)}</div>
+          <code class="zeno-remote-cmd">${esc(remoteConnectCmd(r))}</code>
+          <div class="zeno-setting-block-row">
+            <button type="button" data-remote-copy="${r.id}" class="zeno-mini-btn">Copiar comando</button>
+            <button type="button" data-remote-delete="${r.id}" class="zeno-mini-btn is-danger">Remover</button>
+          </div>
+        </div>`).join('') : '<div class="py-6 text-center text-sm text-muted-foreground">Nenhuma instância. Adicione uma VPS, VM ou Colab.</div>';
+      return `
+      <div class="px-6 py-5">
+        <h2 class="typography-h3 text-foreground">Remote Instances</h2>
+        <p class="typography-meta mt-1 text-muted-foreground">VPS, VM ou Google Colab para rodar o Zeno longe daqui.</p>
+        <div class="mt-6 max-w-[34rem] space-y-3">${cards}</div>
+        <form data-remote-form class="mt-4 grid max-w-[34rem] grid-cols-1 gap-2 sm:grid-cols-[110px_1fr_1fr_auto]">
+          <select data-remote-type class="h-8 rounded-md border border-border bg-transparent px-2 text-sm text-foreground outline-none" style="background: var(--background);">
+            <option value="vps">VPS</option><option value="vm">VM</option><option value="colab">Colab</option>
+          </select>
+          <input data-remote-name-input required placeholder="Nome (ex.: prod)" autocomplete="off" class="h-8 rounded-md border border-border bg-transparent px-2 text-sm text-foreground outline-none">
+          <input data-remote-target-input required placeholder="user@host:22 ou URL do Colab" autocomplete="off" spellcheck="false" class="h-8 rounded-md border border-border bg-transparent px-2 text-sm text-foreground outline-none">
+          <button type="submit" class="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-sm text-foreground">Adicionar</button>
+        </form>
+        <p data-remote-error class="project-form-error" role="alert"></p>
+      </div>`;
+    }
+    if (sec === 'Plugins') {
+      const cards = state.plugins.length ? state.plugins.map((p) => `
+        <div class="zeno-setting-block" data-plugin-block="${p.id}">
+          <div class="zeno-setting-block-head">
+            <input data-plugin-name="${p.id}" value="${esc(p.name)}" spellcheck="false" autocomplete="off" aria-label="Plugin name" class="zeno-setting-block-title">
+            <span class="zeno-setting-block-meta">v${esc(p.version || '1.0.0')}</span>
+            <button type="button" data-plugin-toggle="${p.id}" aria-pressed="${p.enabled ? 'true' : 'false'}" class="zeno-toggle ${p.enabled ? 'is-on' : ''}" aria-label="Ativar plugin" title="${p.enabled ? 'Desativar' : 'Ativar'}"><span></span></button>
+          </div>
+          <p class="zeno-plugin-desc">${esc(p.description || '')}</p>
+          <div class="zeno-setting-block-row">
+            <span class="zeno-setting-block-meta">${(p.functions || []).length} funções · ${(p.buttons || []).length} botões · ${(p.agents || []).length} agentes</span>
+            <span class="flex-1"></span>
+            <button type="button" data-plugin-json="${p.id}" class="zeno-mini-btn">Ver JSON</button>
+            <button type="button" data-plugin-delete="${p.id}" class="zeno-mini-btn is-danger">Excluir</button>
+          </div>
+        </div>`).join('') : '<div class="py-6 text-center text-sm text-muted-foreground">Nenhum plugin. Peça ao agente (“crie um plugin…”) ou crie abaixo.</div>';
+      const active = state.plugins.filter((p) => p.enabled);
+      return `
+      <div class="px-6 py-5">
+        <h2 class="typography-h3 text-foreground">Plugins</h2>
+        <p class="typography-meta mt-1 text-muted-foreground">JSON: ative, desative e renomeie. Aplicados: ${active.length}.</p>
+        <div class="mt-6 max-w-[34rem] space-y-3">${cards}</div>
+        <form data-plugin-form class="mt-4 max-w-[34rem] space-y-2">
+          <input data-plugin-req-name placeholder="Nome do plugin (ex.: Resumo de e-mails)" autocomplete="off" class="h-8 w-full rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">
+          <textarea data-plugin-req-input required rows="2" placeholder="O que o plugin deve fazer? (ex.: resume textos longos em 3 bullets)" class="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm text-foreground outline-none"></textarea>
+          <button type="submit" class="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-sm text-foreground">Gerar e salvar plugin</button>
+        </form>
+        <p data-plugin-error class="project-form-error" role="alert"></p>
       </div>`;
     }
     return `
@@ -1357,7 +1632,10 @@
 
   const render = () => {
     applyTheme();
+    applyPluginCss();
     document.body.classList.toggle('zeno-voice-active', state.voiceMode);
+    document.body.classList.toggle('zeno-compact', state.settingsChat.compactMode === true);
+    document.body.dataset.chatFont = state.settingsChat.fontSize || 'medium';
     renderVoice();
     const chat = $('#chat-root');
     if (chat) {
@@ -1370,13 +1648,11 @@
     }
     const sb = $('[data-sidebar-root]');
     if (sb) { sb.innerHTML = tplSidebar(); bindSidebar(sb); }
-    const nav = $('[data-nav-root]');
-    if (nav) { nav.innerHTML = tplNav(); bindNav(nav); }
     const panel = $('[data-panel-root]');
     if (panel) { panel.innerHTML = tplPanel(); bindPanel(panel); }
     const settings = $('[data-settings-root]');
     if (settings) {
-      const sig = state.settings ? [state.settingsSection, state.colorMode, state.lightTheme, state.darkTheme].join('|') : '';
+      const sig = settingsSig();
       if (settings.dataset.sig !== sig) {
         settings.innerHTML = state.settings ? tplSettings() : '';
         settings.dataset.sig = sig;
@@ -1594,6 +1870,25 @@
   };
 
   const bindChat = (rootEl) => {
+    $$('[data-msg-action]', rootEl).forEach((button) => button.addEventListener('click', (event) => {
+      event.preventDefault();
+      const holder = button.closest('[data-message-id]');
+      const id = holder?.dataset.messageId;
+      if (!id) return;
+      const action = button.dataset.msgAction;
+      if (action === 'copy') { void copyMessageById(id); return; }
+      if (action === 'revert') { revertSessionToMessage(id); return; }
+      if (action === 'branch') { branchSessionFromMessage(id); return; }
+      if (action === 'export-md') { exportMessageMarkdown(id); return; }
+      if (action === 'download-image') { exportMessageImage(id); return; }
+    }));
+    $$('[data-attachment-index]', rootEl).forEach((chip) => chip.addEventListener('click', (event) => {
+      event.preventDefault();
+      const holder = chip.closest('[data-message-id]');
+      const id = holder?.dataset.messageId;
+      const attachment = attachmentFromMessage(id, Number(chip.dataset.attachmentIndex));
+      openAttachmentPreview(attachment);
+    }));
     $$('[data-md-action="copy-code"]', rootEl).forEach((b) => b.addEventListener('click', () => {
       const pre = b.closest('[data-component="markdown-code"]').querySelector('pre');
       if (pre && navigator.clipboard) navigator.clipboard.writeText(pre.innerText).then(() => {
@@ -1925,20 +2220,6 @@
     }));
   };
 
-  const bindNav = (rootEl) => {
-    $$('[data-panel-btn]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      const label = b.dataset.panelBtn;
-      if (state.panel === label) {
-        state.panel = null;
-      } else {
-        state.panel = label;
-        state.panelW = PANELS[label][1];
-      }
-      LS.set('oc-clone-panel', state.panel);
-      render();
-    }));
-  };
-
   const bindPanel = (rootEl) => {
     $$('[data-trace-filter]', rootEl).forEach((b) => b.addEventListener('click', () => { state.traceFilter = b.dataset.traceFilter; render(); }));
     $$('[data-trace-toggle]', rootEl).forEach((b) => b.addEventListener('click', () => { const id = b.dataset.traceToggle; state.traceExpanded[id] = !state.traceExpanded[id]; render(); }));
@@ -1972,6 +2253,7 @@
     }
     const browserForm = $('[data-browser-form]', rootEl);
     if (browserForm) browserForm.addEventListener('submit', (event) => { event.preventDefault(); navigateBrowser($('[data-browser-url]', browserForm).value); });
+    $('[data-action="open-zeno-window"]', rootEl)?.addEventListener('click', () => openInZenoWindow(state.browserUrl || BROWSER_HOME));
     $$('[data-browser-action]', rootEl).forEach((button) => button.addEventListener('click', () => {
       const action = button.dataset.browserAction;
       if (window.ZenoNativeBrowser?.available()) {
@@ -1981,10 +2263,27 @@
         else if (action === 'home') navigateBrowser(BROWSER_HOME);
         return;
       }
-      if (action === 'back' && state.browserHistoryIndex > 0) { state.browserHistoryIndex -= 1; state.browserUrl = state.browserHistory[state.browserHistoryIndex]; render(); }
-      else if (action === 'forward' && state.browserHistoryIndex < state.browserHistory.length - 1) { state.browserHistoryIndex += 1; state.browserUrl = state.browserHistory[state.browserHistoryIndex]; render(); }
-      else if (action === 'home') navigateBrowser(BROWSER_HOME);
-      else if (action === 'reload') render();
+      /* Guia ZENO AGENT: controlamos pela propria referencia da janela.
+         Cross-origin so permite setar location; back/forward usam nosso historico. */
+      const alive = zenoWin && !zenoWin.closed;
+      if (action === 'back' && state.browserHistoryIndex > 0) {
+        state.browserHistoryIndex -= 1;
+        state.browserUrl = state.browserHistory[state.browserHistoryIndex];
+        if (alive) { zenoWin.location.href = state.browserUrl; zenoWin.focus(); }
+        else openInZenoWindow(state.browserUrl);
+      } else if (action === 'forward' && state.browserHistoryIndex < state.browserHistory.length - 1) {
+        state.browserHistoryIndex += 1;
+        state.browserUrl = state.browserHistory[state.browserHistoryIndex];
+        if (alive) { zenoWin.location.href = state.browserUrl; zenoWin.focus(); }
+        else openInZenoWindow(state.browserUrl);
+      } else if (action === 'reload') {
+        if (alive) { zenoWin.location.href = state.browserUrl; zenoWin.focus(); }
+        else openInZenoWindow(state.browserUrl || BROWSER_HOME);
+      } else if (action === 'home') {
+        navigateBrowser(BROWSER_HOME);
+      }
+      const input = $('[data-browser-url]', rootEl);
+      if (input) input.value = state.browserUrl;
     }));
     if (window.ZenoNativeBrowser?.available()) {
       window.onZenoBrowserState = (url) => { state.browserUrl = String(url || state.browserUrl); const input = $('[data-browser-url]', rootEl); if (input) input.value = state.browserUrl; };
@@ -2064,15 +2363,6 @@
     return stream;
   };
 
-  const blobToBase64 = async (blob) => {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let binary = '';
-    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-    }
-    return btoa(binary);
-  };
-
   let deepgramConfigCache = null;
   const loadDeepgramConfig = async () => {
     if (deepgramConfigCache) return deepgramConfigCache;
@@ -2100,7 +2390,7 @@
 
   const deepgramTranscribe = async (blob, langOverride) => {
     const { apiKey, language, model } = await loadDeepgramConfig();
-    if (!apiKey) throw new Error('DEEPGRAM_API_KEY não configurada (use o .env, window.DEEPGRAM_API_KEY ou o ZenoAgent.exe).');
+    if (!apiKey) throw new Error('DEEPGRAM_API_KEY não configurada (use o .env, window.DEEPGRAM_API_KEY ou o backend ZenoC).');
     const url = new URL('https://api.deepgram.com/v1/listen');
     url.searchParams.set('model', model);
     url.searchParams.set('language', langOverride || language);
@@ -2118,11 +2408,48 @@
     return transcript;
   };
 
-  const transcribeAudio = async (blob, langOverride) => {
-    const transcribe = window.go?.main?.App?.TranscribeAudio;
-    if (typeof transcribe === 'function') {
-      return String(await transcribe(await blobToBase64(blob), blob.type || 'audio/webm')).trim();
+  let openaiKeyCache = null;
+  const loadOpenaiKey = async () => {
+    if (openaiKeyCache) return openaiKeyCache;
+    let key = window.OPENAI_API_KEY || LS.get('oc-clone-voice-openai-key', '');
+    if (!key) {
+      try {
+        const response = await fetch('.env', { cache: 'no-store' });
+        if (response.ok) {
+          const text = await response.text();
+          const match = text.match(/^OPENAI_API_KEY=(.*)$/m);
+          if (match) key = match[1].trim().replace(/^["']|["']$/g, '');
+        }
+      } catch {}
     }
+    if (key) openaiKeyCache = key;
+    return key;
+  };
+
+  const openaiTranscribe = async (blob, langOverride) => {
+    const apiKey = await loadOpenaiKey();
+    if (!apiKey) throw new Error('OPENAI_API_KEY não configurada (Voice → OpenAI → API key).');
+    const form = new FormData();
+    form.append('file', blob, 'audio.webm');
+    form.append('model', state.voiceProvider === 'openai' && state.voiceSttModel ? state.voiceSttModel : 'whisper-1');
+    if (langOverride || state.voiceLang) form.append('language', (langOverride || state.voiceLang).slice(0, 2).toLowerCase());
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error?.message || `Falha no Whisper (${response.status}).`);
+    const transcript = (payload?.text || '').trim();
+    if (!transcript) throw new Error('Nenhuma fala foi reconhecida.');
+    return transcript;
+  };
+
+  /* Backend de voz: somente o ZenoC (C11). O shell (webview/nativo) apenas
+   * transporta o áudio até o provider com a chave do usuário; nenhuma lógica
+   * de backend é escrita em outra linguagem. */
+  const transcribeAudio = async (blob, langOverride) => {
+    if (state.voiceProvider === 'openai') return openaiTranscribe(blob, langOverride);
     return deepgramTranscribe(blob, langOverride);
   };
 
@@ -2209,6 +2536,64 @@
     } catch {}
   };
 
+  /* ---------- studio helpers (espelham o backend C puro) ---------- */
+  const persistPlugins = () => LS.set('oc-clone-plugins', state.plugins);
+  const persistRemotes = () => LS.set('oc-clone-remotes', state.remotes);
+
+  const pluginSlugify = (text) => {
+    const slug = String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+    return slug.length >= 2 ? slug : 'plugin';
+  };
+
+  const pluginCreate = (request, nameHint) => {
+    const req = String(request || '').trim().slice(0, 400);
+    if (!req) return null;
+    const name = String(nameHint || '').trim().slice(0, 80) || (req.length > 40 ? req.slice(0, 40) + '…' : req);
+    const slug = pluginSlugify(nameHint || req);
+    const fn = `${slug.replace(/-/g, '_')}_run`;
+    return {
+      id: slug, name, version: '1.0.0', enabled: true, description: req,
+      functions: [{ name: fn, description: req, parameters: { type: 'object' } }],
+      buttons: [{ id: `${slug}-btn`, label: name, icon: 'oc-puzzle-2', action: `run-${slug}` }],
+      agents: [{ name: `${name} Helper`, prompt: `Você é o agente do plugin ${name}: ${req}`, model: '' }],
+      ui: { css: '', theme: 'auto' },
+    };
+  };
+
+  const applyPluginCss = () => {
+    let host = document.querySelector('style[data-plugins]');
+    if (!host) {
+      host = document.createElement('style');
+      host.dataset.plugins = 'true';
+      document.head.appendChild(host);
+    }
+    host.textContent = state.plugins.filter((p) => p.enabled && p.ui?.css).map((p) => `/* ${p.id} */\n${p.ui.css}`).join('\n');
+  };
+
+  const activePluginButtons = () => state.plugins.filter((p) => p.enabled).flatMap((p) => p.buttons || []).slice(0, 12);
+
+  const remoteAdd = (type, name, target) => {
+    const t = String(type || '').toLowerCase();
+    const nm = String(name || '').trim();
+    const tg = String(target || '').trim();
+    if (!['vps', 'vm', 'colab'].includes(t) || !nm || !tg) return { error: 'Tipo deve ser vps, vm ou colab; nome e destino são obrigatórios.' };
+    if (t === 'colab') {
+      if (!/https?:\/\//i.test(tg)) return { error: 'Colab precisa de uma URL https.' };
+      return { remote: { id: 'rem_' + uid(), name: nm, type: t, host: 'colab', user: '', port: 0, url: tg, createdAt: new Date().toISOString() } };
+    }
+    const m = tg.match(/^(?:([^@\s]+)@)?([^\s:@]+)(?::(\d+))?$/);
+    if (!m) return { error: 'Destino inválido. Use [user@]host[:porta].' };
+    const port = m[3] ? Number(m[3]) : 22;
+    if (port < 1 || port > 65535) return { error: 'Porta inválida.' };
+    return { remote: { id: 'rem_' + uid(), name: nm, type: t, host: m[2], user: m[1] || 'root', port, url: '', createdAt: new Date().toISOString() } };
+  };
+
+  const remoteConnectCmd = (r) => {
+    if (!r) return '';
+    if (r.type === 'colab') return r.url;
+    return r.port && r.port !== 22 ? `ssh -p ${r.port} ${r.user}@${r.host}` : `ssh ${r.user}@${r.host}`;
+  };
+
   const setModel = (name) => {
     state.model = name;
     LS.set('oc-clone-model', name);
@@ -2230,13 +2615,307 @@
     setTimeout(() => hint.remove(), 2400);
   };
 
+  /* ---------- checkpoints: reverter / bifurcar / copiar mensagem ---------- */
+  /* Snapshot do estado do workspace no momento em que a mensagem foi enviada.
+     Permite reverter a conversa e os “arquivos” (projetos, plugins, memória)
+     exatamente para aquele ponto. */
+  const captureWorkspaceSnapshot = () => ({
+    plugins: JSON.parse(JSON.stringify(state.plugins || [])),
+    projects: JSON.parse(JSON.stringify(state.projects || [])),
+    memoryNotes: JSON.parse(JSON.stringify(state.memoryNotes || [])),
+    memoryEdges: JSON.parse(JSON.stringify(state.memoryEdges || [])),
+    activeProjectId: state.activeProjectId ?? null,
+    model: state.model,
+    design: state.design,
+  });
+
+  const restoreWorkspaceSnapshot = (snap) => {
+    if (!snap || typeof snap !== 'object') return;
+    if (Array.isArray(snap.plugins)) {
+      state.plugins = JSON.parse(JSON.stringify(snap.plugins));
+      persistPlugins();
+      applyPluginCss();
+    }
+    if (Array.isArray(snap.projects)) {
+      state.projects = JSON.parse(JSON.stringify(snap.projects));
+      LS.set('oc-clone-projects', state.projects);
+    }
+    if (Array.isArray(snap.memoryNotes)) {
+      state.memoryNotes = JSON.parse(JSON.stringify(snap.memoryNotes));
+      LS.set('oc-clone-memory-notes', state.memoryNotes);
+    }
+    if (Array.isArray(snap.memoryEdges)) {
+      state.memoryEdges = JSON.parse(JSON.stringify(snap.memoryEdges));
+      LS.set('oc-clone-memory-edges', state.memoryEdges);
+    }
+    if ('activeProjectId' in snap) state.activeProjectId = snap.activeProjectId;
+    if (snap.model) setModel(snap.model);
+    if (snap.design) setDesign(snap.design);
+    persistWorkspace();
+  };
+
+  /* Texto puro de uma mensagem (inputs, reasoning, tools, outputs). */
+  const messagePlainText = (m) => {
+    if (!m) return '';
+    const parts = [];
+    if (m.thinking) parts.push(m.thinking);
+    if (Array.isArray(m.tools) && m.tools.length) {
+      parts.push(m.tools.map((t) => `$ ${t.cmd || ''}\n${(t.output || []).join('\n')}`).join('\n\n'));
+    }
+    if (m.text) parts.push(m.text);
+    if (m.code) parts.push('```' + (m.code.lang || '') + '\n' + m.code.lines.map(([t]) => t).join('') + '\n```');
+    return parts.join('\n\n').trim();
+  };
+
+  const copyTextToClipboard = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      try {
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        const ok = document.execCommand('copy');
+        area.remove();
+        return ok;
+      } catch { return false; }
+    }
+  };
+
+  const messageById = (id) => activeSession()?.messages.find((m) => m.id === id) || null;
+
+  const copyMessageById = async (id) => {
+    const message = messageById(id);
+    if (!message) return;
+    const ok = await copyTextToClipboard(messagePlainText(message));
+    const form = $('[data-composer-form]');
+    if (form) flashComposerHint(form, ok ? 'Mensagem copiada' : 'Não foi possível copiar');
+  };
+
+  /* Markdown completo da conversa para anexar ao bifurcar. */
+  const buildTranscriptMarkdown = (messages, session) => {
+    const lines = [];
+    lines.push(`# Histórico da conversa — ${session?.title || 'Chat'}`);
+    lines.push('');
+    lines.push(`> Bifurcado em ${now().toLocaleString()} · ${messages.length} mensagem(ns)`);
+    lines.push('');
+    messages.forEach((m, i) => {
+      const who = m.role === 'user' ? 'Usuário' : 'Zeno';
+      lines.push(`## ${i + 1}. ${who} · ${m.time || ''}`);
+      lines.push('');
+      if (m.role === 'assistant') {
+        const meta = [m.model, m.agent && `agente: ${m.agent}`].filter(Boolean).join(' · ');
+        if (meta) { lines.push(`*${meta}*`); lines.push(''); }
+        if (m.thinking) { lines.push('### Raciocínio'); lines.push(''); lines.push(m.thinking); lines.push(''); }
+        if (Array.isArray(m.tools) && m.tools.length) {
+          lines.push('### Ferramentas');
+          lines.push('');
+          m.tools.forEach((t) => {
+            lines.push(`**${t.title || 'Tool'}** — \`${t.cmd || ''}\`${t.duration ? ` (${t.duration})` : ''}`);
+            lines.push('');
+            lines.push('```text');
+            lines.push(...(t.output || []));
+            lines.push('```');
+            lines.push('');
+          });
+        }
+        if (m.text) { lines.push('### Resposta'); lines.push(''); lines.push(m.text); lines.push(''); }
+        if (m.code) { lines.push('```' + (m.code.lang || '')); lines.push(m.code.lines.map(([t]) => t).join('')); lines.push('```'); lines.push(''); }
+      } else {
+        if (m.text) { lines.push(m.text); lines.push(''); }
+        (m.attachments || []).forEach((a) => { lines.push(`**Anexo:** ${a.name}`); lines.push(''); });
+      }
+      lines.push('---');
+      lines.push('');
+    });
+    return lines.join('\n');
+  };
+
+  const slugify = (text) => String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+
+  const branchSessionFromMessage = (id) => {
+    const origin = activeSession();
+    if (!origin) return;
+    const index = origin.messages.findIndex((m) => m.id === id);
+    if (index < 0) return;
+    const branchMessages = origin.messages.slice(0, index + 1);
+    const markdown = buildTranscriptMarkdown(branchMessages, origin);
+    const base = slugify(origin.title) || 'conversa-anterior';
+    const session = createSession(origin.projectId || null);
+    session.title = `Branch · ${origin.title}`.slice(0, 70);
+    session.messages.push({
+      id: 'msg_' + uid(),
+      role: 'user',
+      text: `Bifurquei **${origin.title}** a partir desta mensagem. O histórico completo da conversa anterior está no anexo abaixo — raciocínio, ferramentas e respostas incluídos.`,
+      time: fmtTime(now()),
+      attachments: [{
+        name: `${base}.md`,
+        kind: 'markdown',
+        mime: 'text/markdown',
+        content: markdown,
+        size: `${Math.max(1, Math.round(markdown.length / 1024))} KB`,
+      }],
+      snapshot: captureWorkspaceSnapshot(),
+    });
+    state.activeId = session.id;
+    state.draftNew = false;
+    state.workspace = 'chat';
+    state.noteId = null;
+    state.panel = null;
+    LS.set('oc-clone-sessions', state.sessions);
+    LS.set('oc-clone-active', state.activeId);
+    persistWorkspace();
+    render();
+    const form = $('[data-composer-form]');
+    if (form) flashComposerHint(form, 'Conversa bifurcada para um novo chat');
+  };
+
+  const revertSessionToMessage = (id) => {
+    const session = activeSession();
+    if (!session) return;
+    const index = session.messages.findIndex((m) => m.id === id);
+    if (index < 0) return;
+    const message = session.messages[index];
+    const removed = session.messages.length - index;
+    const ok = window.confirm(`Reverter para esta mensagem?\n\n${removed} mensagem(ns) serão removidas e os arquivos/estado do workspace voltam ao ponto em que ela foi enviada.`);
+    if (!ok) return;
+    session.messages = session.messages.slice(0, index);
+    if (message.snapshot) restoreWorkspaceSnapshot(message.snapshot);
+    state.typing = false;
+    state.liveTrace = null;
+    state.expandedTools = {};
+    LS.set('oc-clone-sessions', state.sessions);
+    render();
+    const form = $('[data-composer-form]');
+    const input = form ? $('[data-composer-input]', form) : null;
+    if (input && message.text) {
+      input.innerText = message.text;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+    }
+    if (form) flashComposerHint(form, 'Conversa revertida — edite e envie novamente');
+  };
+
+  /* ---------- anexos (.md) ---------- */
+  const attachmentFromMessage = (messageId, index) => {
+    const message = messageById(messageId);
+    return message?.attachments?.[index] || null;
+  };
+
+  const downloadAttachment = (att) => {
+    if (!att) return;
+    try {
+      const blob = new Blob([att.content || ''], { type: att.mime || 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = att.name || 'anexo.md';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } catch { /* ignore */ }
+  };
+
+  const exportMessageMarkdown = (id) => {
+    const message = messageById(id);
+    if (!message) return;
+    const heading = message.role === 'assistant' ? `# Resposta — ${message.model || 'Zeno'}` : '# Mensagem';
+    const content = `${heading}\n\n_${message.time || ''}_\n\n${messagePlainText(message)}\n`;
+    downloadAttachment({ name: `mensagem-${String(id).slice(-6)}.md`, mime: 'text/markdown', content });
+  };
+
+  const exportMessageImage = (id) => {
+    const message = messageById(id);
+    if (!message) return;
+    const width = 900, pad = 40, lineHeight = 22, fontSize = 15;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const mono = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+    ctx.font = mono;
+    const wrap = (str, max) => {
+      const out = [];
+      String(str || '').split('\n').forEach((par) => {
+        if (!par) { out.push(''); return; }
+        let line = '';
+        par.split(' ').forEach((word) => {
+          const test = line ? `${line} ${word}` : word;
+          if (ctx.measureText(test).width > max && line) { out.push(line); line = word; } else line = test;
+        });
+        out.push(line);
+      });
+      return out;
+    };
+    const lines = wrap(messagePlainText(message), width - pad * 2);
+    canvas.width = width;
+    canvas.height = Math.max(160, pad * 2 + lines.length * lineHeight + 40);
+    ctx.fillStyle = '#0b0b0b';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#8a8a8a';
+    ctx.font = '600 13px ui-sans-serif, system-ui, sans-serif';
+    ctx.fillText(`${message.role === 'assistant' ? 'Zeno' : 'Você'} · ${message.time || ''}`, pad, pad - 6);
+    ctx.fillStyle = '#e8e8e8';
+    ctx.font = mono;
+    lines.forEach((line, i) => ctx.fillText(line, pad, pad + 20 + i * lineHeight));
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `mensagem-${String(id).slice(-6)}.png`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    });
+  };
+
+  const openAttachmentPreview = (att) => {
+    if (!att) return;
+    document.querySelector('[data-attachment-modal]')?.remove();
+    const overlay = document.createElement('div');
+    overlay.dataset.attachmentModal = 'true';
+    overlay.className = 'zeno-attachment-modal';
+    overlay.innerHTML = `
+      <div class="zeno-attachment-backdrop" data-attachment-close></div>
+      <article role="dialog" aria-modal="true" aria-label="${esc(att.name)}" class="zeno-attachment-dialog oc-dialog">
+        <header class="zeno-attachment-header">
+          <div class="zeno-attachment-title">${icon('oc-file-text', 'remixicon h-4 w-4')}<span>${esc(att.name)}</span><span class="zeno-attachment-size">${esc(att.size || 'md')}</span></div>
+          <div class="zeno-attachment-header-actions">
+            <button type="button" data-attachment-download class="zeno-attachment-download">${icon('oc-download', 'remixicon h-3.5 w-3.5')}Download</button>
+            <button type="button" data-attachment-close class="memory-icon-button" aria-label="Close">${icon('oc-close', 'remixicon h-4 w-4')}</button>
+          </div>
+        </header>
+        <div class="zeno-attachment-body">${renderMarkdown(att.content || '')}</div>
+      </article>`;
+    const onKey = (event) => {
+      if (event.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); }
+    };
+    overlay.addEventListener('click', (event) => {
+      if (event.target.closest('[data-attachment-close]')) { overlay.remove(); document.removeEventListener('keydown', onKey); return; }
+      if (event.target.closest('[data-attachment-download]')) downloadAttachment(att);
+    });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+  };
+
   const deliverUserText = (text) => {
     const clean = String(text || '').trim();
-    if (!clean || state.typing) return false;
+    if (!clean) return false;
+    /* Em modo voz a conversa é contínua: em vez de descartar o que foi falado
+     * durante a resposta do agente, enfileira para logo em seguida. */
+    if (state.typing) {
+      if (state.voiceMode) voicePendingQueue.push(clean);
+      return state.voiceMode;
+    }
     if (state.draftNew) createSession(state.activeProjectId || null);
     const s = activeSession();
     if (!s) return false;
-    s.messages.push({ id: 'msg_' + uid(), role: 'user', text: clean, time: fmtTime(now()) });
+    s.messages.push({ id: 'msg_' + uid(), role: 'user', text: clean, time: fmtTime(now()), snapshot: captureWorkspaceSnapshot() });
     state.liveTrace = [{ id: 'live_thinking', type: 'thinking', label: 'Thinking', icon: 'oc-brain-ai-3', text: 'Processando a solicitação…', meta: 'live' }];
     state.typing = true;
     render(true);
@@ -2250,7 +2929,11 @@
       render(true);
       if (state.voiceMode && voiceRuntime && !voiceRuntime.stopped) {
         voicePushLine(voiceRuntime, 'zeno', reply.text);
-        void voiceSpeak(voiceRuntime, reply.text);
+        if (state.voiceAutoSpeak !== false) void voiceSpeak(voiceRuntime, reply.text);
+      }
+      if (state.voiceMode && voicePendingQueue.length) {
+        const next = voicePendingQueue.shift();
+        setTimeout(() => deliverUserText(next), 250);
       }
     }, 2200 + Math.random() * 800);
     return true;
@@ -2258,37 +2941,56 @@
 
   /* ---------- voice mode (Deepgram STT + black-hole reaction) ---------- */
   let voiceRuntime = null;
+  let voicePendingQueue = [];
 
-  const tplVoiceOverlay = () => {
-    if (!state.voiceMode) return '';
+  const voiceGreeting = () => {
+    if ((state.voiceLang || '').startsWith('en')) return "Hi! I'm Zeno. Talk to me, I'm listening.";
+    if ((state.voiceLang || '').startsWith('es')) return '¡Hola! Soy Zeno. Habla conmigo, te escucho.';
+    return 'Olá! Sou o Zeno. Fale comigo, estou ouvindo.';
+  };
+
+  const voiceStatusText = (status, error) => ({
+    starting: 'Ativando microfone…',
+    listening: 'Ouvindo — fale com o Zeno',
+    transcribing: 'Transcrevendo…',
+    speaking: 'Zeno está respondendo…',
+    error: error || 'Falha no modo voz.',
+  }[status] || status);
+
+  const voiceIndicator = (status) => status === 'listening'
+    ? '<span class="zeno-voice-live-dot" aria-hidden="true"></span>'
+    : status === 'starting' || status === 'transcribing' || status === 'speaking'
+      ? '<span class="oc-spinner" aria-hidden="true"></span>'
+      : '';
+
+  /* Modo voz sem pop-up: as ondas de áudio aparecem dentro da caixa do composer. */
+  const tplVoiceInline = () => {
     const runtime = voiceRuntime;
     const status = runtime?.status || 'starting';
-    const statusText = {
-      starting: 'Ativando microfone…',
-      listening: 'Ouvindo — fale com o Zeno',
-      transcribing: 'Transcrevendo…',
-      speaking: 'Zeno está respondendo…',
-      error: runtime?.error || 'Falha no modo voz.',
-    }[status] || status;
-    const lines = (runtime?.lines || []).slice(-6);
-    return `<div class="zeno-voice-layer" data-voice-layer>
-      <div class="zeno-voice-panel">
-        <div class="zeno-voice-status">${status === 'listening' ? '<span class="zeno-voice-live-dot" aria-hidden="true"></span>' : status === 'speaking' || status === 'transcribing' || status === 'starting' ? '<span class="oc-spinner" aria-hidden="true"></span>' : ''}<span data-voice-status>${esc(statusText)}</span></div>
-        <div class="zeno-voice-meter" aria-hidden="true"><div data-voice-meter></div></div>
-        <div class="zeno-voice-transcript" data-voice-transcript>${lines.length ? lines.map((line) => line.who === 'you' ? `<div><strong>Você:</strong> ${esc(line.text)}</div>` : line.who === 'zeno' ? `<div><strong>Zeno:</strong> ${esc(line.text)}</div>` : `<div>${esc(line.text)}</div>`).join('') : '<span>Diga alguma coisa…</span>'}</div>
-        <div class="zeno-voice-actions">
-          <button type="button" data-action="voice-exit" class="zeno-voice-end">${icon('oc-stop', 'remixicon h-4 w-4')}<span>Encerrar conversa</span></button>
+    const providerLabel = state.voiceProvider === 'openai' ? 'OpenAI' : 'Deepgram';
+    return `
+      <div class="zeno-voice-inline" data-voice-inline>
+        <div class="zeno-voice-inline-head">
+          <span class="zeno-voice-inline-state" data-voice-inline-state="${status}"><span class="zeno-voice-indicator" data-voice-indicator>${voiceIndicator(status)}</span><span data-voice-status>${esc(voiceStatusText(status, runtime?.error))}</span></span>
+          <span class="zeno-voice-inline-meta">${esc(providerLabel)} · ${esc(state.voiceLang)}</span>
+          <button type="button" data-action="voice-exit" class="zeno-voice-inline-exit" title="Encerrar conversa" aria-label="Encerrar conversa">${icon('oc-stop', 'remixicon h-3.5 w-3.5')}</button>
         </div>
-        <div class="zeno-voice-lang">Deepgram · ${esc(state.voiceLang)} · comando /idioma troca o idioma</div>
-      </div>
-    </div>`;
+        <canvas class="zeno-voice-wave" data-voice-wave width="760" height="64" aria-hidden="true"></canvas>
+        <div class="zeno-voice-meter" aria-hidden="true"><div data-voice-meter></div></div>
+      </div>`;
   };
 
   const renderVoice = () => {
-    const rootEl = $('[data-voice-root]');
-    if (!rootEl) return;
-    rootEl.innerHTML = tplVoiceOverlay();
-    $('[data-action="voice-exit"]', rootEl)?.addEventListener('click', () => setVoiceMode(false));
+    const inline = $('[data-voice-inline]');
+    if (!inline) return;
+    const runtime = voiceRuntime;
+    const status = runtime?.status || 'starting';
+    const label = $('[data-voice-status]', inline);
+    if (label) label.textContent = voiceStatusText(status, runtime?.error);
+    const stateEl = $('[data-voice-inline-state]', inline);
+    if (stateEl) stateEl.dataset.voiceInlineState = status;
+    const indicator = $('[data-voice-indicator]', inline);
+    if (indicator) indicator.innerHTML = voiceIndicator(status);
   };
 
   const voicePushLine = (runtime, who, text) => {
@@ -2304,10 +3006,36 @@
     renderVoice();
   };
 
+  const pushVoiceGreeting = () => {
+    const session = activeSession();
+    if (!session || session.messages.length) return;
+    session.messages.push({
+      id: 'msg_' + uid(),
+      role: 'assistant',
+      text: voiceGreeting(),
+      time: fmtTime(now()),
+      model: state.model,
+      agent: 'build',
+      duration: '—',
+    });
+    LS.set('oc-clone-sessions', state.sessions);
+  };
+
   const setVoiceMode = (on) => {
     if (on && state.voiceMode && voiceRuntime) return;
     if (!on && !state.voiceMode) return;
     state.voiceMode = on;
+    if (on) {
+      /* Modo voz abre o chat: as transcrições da conversa ficam na sessão ativa
+       * (cria uma quando ainda estamos no estado vazio). */
+      state.workspace = 'chat';
+      state.noteId = null;
+      if (state.draftNew || !activeSession()) createSession(state.activeProjectId || null);
+      pushVoiceGreeting();
+      persistWorkspace();
+    } else {
+      voicePendingQueue = [];
+    }
     document.body.classList.toggle('zeno-voice-active', on);
     if (on) void startVoiceLoop();
     else stopVoiceLoop();
@@ -2320,6 +3048,7 @@
     if (!runtime) { blackHoleSend({ type: 'voice-off' }); return; }
     runtime.stopped = true;
     try { if (runtime.raf) cancelAnimationFrame(runtime.raf); } catch {}
+    try { clearInterval(runtime.ttsTimer); } catch {}
     try { if (runtime.recorder?.state && runtime.recorder.state !== 'inactive') runtime.recorder.stop(); } catch {}
     try { runtime.stream?.getTracks?.().forEach((track) => track.stop()); } catch {}
     try { runtime.ctx?.close?.(); } catch {}
@@ -2327,19 +3056,52 @@
     blackHoleSend({ type: 'voice-off' });
   };
 
+  const voiceDrawWave = (runtime, level) => {
+    const canvas = document.querySelector('[data-voice-wave]');
+    if (!canvas) return;
+    try {
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width, H = canvas.height;
+      ctx.clearRect(0, 0, W, H);
+      const bars = 56;
+      const freq = runtime.freq || null;
+      const mid = H / 2;
+      for (let i = 0; i < bars; i++) {
+        let v = level;
+        if (freq) v = Math.min(1, (freq[Math.floor((i / bars) * freq.length)] / 255) * 1.4 + level * 0.25);
+        const h = Math.max(3, v * (H * 0.86));
+        const x = (i / bars) * W + (W / bars - 3) / 2;
+        const grad = ctx.createLinearGradient(0, mid - h / 2, 0, mid + h / 2);
+        grad.addColorStop(0, '#8ab6ff');
+        grad.addColorStop(1, '#c9a6ff');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x, mid - h / 2, 3, h, 2);
+        else ctx.rect(x, mid - h / 2, 3, h);
+        ctx.fill();
+      }
+    } catch {}
+  };
+
   const voiceMeterLoop = (runtime) => {
     if (!runtime || runtime.stopped) return;
     try {
       runtime.analyser.getByteTimeDomainData(runtime.data);
+      if (runtime.freq) runtime.analyser.getByteFrequencyData(runtime.freq);
       let sum = 0;
       for (let i = 0; i < runtime.data.length; i++) {
         const v = (runtime.data[i] - 128) / 128;
         sum += v * v;
       }
-      const level = Math.min(1, Math.sqrt(sum / runtime.data.length) * 3.2);
+      let level = Math.min(1, Math.sqrt(sum / runtime.data.length) * 3.2);
+      if (runtime.speaking) level = Math.min(1, level * 0.4 + (runtime.ttsLevel || 0.35));
+      /* A área do chat vira o visualizador: o buraco negro se movimenta e as
+       * partículas se agitam proporcionalmente à energia da voz. */
       blackHoleSend({ type: 'voice', level: Number(level.toFixed(3)) });
+      if (level > 0.45) blackHoleSend({ type: 'drag', dx: (Math.random() - 0.5) * level * 6, dy: (Math.random() - 0.5) * level * 4 });
       const meter = document.querySelector('[data-voice-meter]');
       if (meter) meter.style.width = `${Math.round(level * 100)}%`;
+      voiceDrawWave(runtime, level);
     } catch {}
     runtime.raf = requestAnimationFrame(() => voiceMeterLoop(runtime));
   };
@@ -2385,7 +3147,7 @@
       source.connect(analyser);
       const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'].find((type) => !window.MediaRecorder?.isTypeSupported || window.MediaRecorder.isTypeSupported(type));
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-      Object.assign(runtime, { stream, ctx, analyser, data: new Uint8Array(analyser.fftSize), recorder, mimeType });
+      Object.assign(runtime, { stream, ctx, analyser, data: new Uint8Array(analyser.fftSize), freq: new Uint8Array(analyser.frequencyBinCount), recorder, mimeType });
       recorder.addEventListener('dataavailable', (event) => {
         if (event.data?.size) void transcribeVoiceChunk(runtime, event.data);
       });
@@ -2393,29 +3155,72 @@
       recorder.start(4000);
       voiceSetStatus(runtime, 'listening');
       voiceMeterLoop(runtime);
+      /* O agente cumprimenta falando; a mensagem já está no chat
+       * (pushVoiceGreeting) e daí a conversa segue em loop contínuo. */
+      if (state.voiceAutoSpeak !== false) void voiceSpeak(runtime, voiceGreeting());
     } catch (error) {
       voiceSetStatus(runtime, 'error', error?.message || 'Microfone indisponível.');
     }
   };
 
-  const voiceSpeak = (runtime, text) => new Promise((resolve) => {
-    const done = () => {
-      if (runtime) {
-        runtime.speaking = false;
-        try { runtime.recorder?.resume?.(); } catch {}
-        if (!runtime.stopped) voiceSetStatus(runtime, 'listening');
-      }
-      resolve();
-    };
+  /* TTS: Deepgram prioritário → OpenAI opcional → speechSynthesis local.
+   * Durante a fala o buraco negro se agita (ttsLevel alimenta o medidor). */
+  const voiceTtsAgitate = (runtime, on) => {
+    if (!runtime) return;
+    if (on) {
+      runtime.ttsLevel = 0.5;
+      try {
+        clearInterval(runtime.ttsTimer);
+        runtime.ttsTimer = setInterval(() => {
+          if (!runtime || runtime.stopped || !runtime.speaking) return;
+          runtime.ttsLevel = 0.3 + Math.random() * 0.55;
+          blackHoleSend({ type: 'voice', level: Number(runtime.ttsLevel.toFixed(3)) });
+          blackHoleSend({ type: 'drag', dx: (Math.random() - 0.5) * 5, dy: (Math.random() - 0.5) * 3 });
+        }, 140);
+      } catch {}
+    } else {
+      runtime.ttsLevel = 0;
+      try { clearInterval(runtime.ttsTimer); } catch {}
+      blackHoleSend({ type: 'voice', level: 0.05 });
+    }
+  };
+
+  const voiceSpeakDeepgram = async (clean) => {
+    const { apiKey, model } = await loadDeepgramConfig();
+    if (!apiKey) return null;
+    const ttsModel = state.voiceTtsModel || model || 'aura-asteria-en';
+    const url = `https://api.deepgram.com/v1/speak?model=${encodeURIComponent(ttsModel)}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Token ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: clean }),
+    });
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return blob && blob.size ? blob : null;
+  };
+
+  const voiceSpeakOpenai = async (clean) => {
+    const apiKey = await loadOpenaiKey();
+    if (!apiKey) return null;
+    const response = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: state.voiceTtsModel && state.voiceProvider === 'openai' ? state.voiceTtsModel : 'tts-1',
+        voice: state.voiceName || 'alloy',
+        input: clean,
+      }),
+    });
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return blob && blob.size ? blob : null;
+  };
+
+  const voiceSpeakNative = (clean) => new Promise((resolve) => {
     try {
       const synth = window.speechSynthesis;
-      const clean = String(text || '').replace(/[*_`#>\-[\]()]/g, '').trim().slice(0, 500);
-      if (!synth || !clean) return done();
-      if (runtime) {
-        runtime.speaking = true;
-        try { runtime.recorder?.pause?.(); } catch {}
-        voiceSetStatus(runtime, 'speaking');
-      }
+      if (!synth || !clean) return resolve(false);
       synth.cancel();
       const utterance = new SpeechSynthesisUtterance(clean);
       utterance.lang = state.voiceLang;
@@ -2425,17 +3230,69 @@
         if (match) utterance.voice = match;
       } catch {}
       let finished = false;
-      const finish = () => { if (!finished) { finished = true; clearTimeout(safety); done(); } };
-      const safety = setTimeout(finish, 30000);
-      utterance.onend = finish;
-      utterance.onerror = finish;
+      const safety = setTimeout(() => { if (!finished) { finished = true; resolve(true); } }, 30000);
+      utterance.onend = () => { if (!finished) { finished = true; clearTimeout(safety); resolve(true); } };
+      utterance.onerror = () => { if (!finished) { finished = true; clearTimeout(safety); resolve(false); } };
       synth.speak(utterance);
-    } catch { done(); }
+    } catch { resolve(false); }
+  });
+
+  const voiceSpeak = (runtime, text) => new Promise((resolve) => {
+    const done = () => {
+      if (runtime) {
+        runtime.speaking = false;
+        voiceTtsAgitate(runtime, false);
+        try { runtime.recorder?.resume?.(); } catch {}
+        if (!runtime.stopped) voiceSetStatus(runtime, 'listening');
+      }
+      resolve();
+    };
+    (async () => {
+      try {
+        const clean = String(text || '').replace(/[*_`#>\-[\]()]/g, '').trim().slice(0, 500);
+        if (!clean) return done();
+        if (runtime) {
+          runtime.speaking = true;
+          try { runtime.recorder?.pause?.(); } catch {}
+          voiceSetStatus(runtime, 'speaking');
+          voiceTtsAgitate(runtime, true);
+        }
+        try { window.speechSynthesis?.cancel?.(); } catch {}
+        /* Prioridade: Deepgram; opção: OpenAI; fallback: voz local. */
+        let audioBlob = null;
+        if (state.voiceProvider === 'openai') {
+          try { audioBlob = await voiceSpeakOpenai(clean); } catch {}
+          if (!audioBlob) { try { audioBlob = await voiceSpeakDeepgram(clean); } catch {} }
+        } else {
+          try { audioBlob = await voiceSpeakDeepgram(clean); } catch {}
+          if (!audioBlob) { try { audioBlob = await voiceSpeakOpenai(clean); } catch {} }
+        }
+        if (audioBlob && runtime && !runtime.stopped) {
+          const url = URL.createObjectURL(audioBlob);
+          await new Promise((playDone) => {
+            const audio = new Audio(url);
+            audio.onended = playDone;
+            audio.onerror = playDone;
+            setTimeout(playDone, 45000);
+            audio.play().catch(playDone);
+          });
+          try { URL.revokeObjectURL(url); } catch {}
+          return done();
+        }
+        if (audioBlob && (!runtime || runtime.stopped)) return done();
+        await voiceSpeakNative(clean);
+        return done();
+      } catch { done(); }
+    })();
   });
 
   const bindComposer = (rootEl) => {
     const form = $('[data-composer-form]', rootEl);
     if (!form) return;
+    if (state.voiceMode) {
+      $('[data-action="voice-exit"]', form)?.addEventListener('click', () => setVoiceMode(false));
+      return;
+    }
     const input = $('[data-composer-input]', form);
     if (!input) return;
     /* ---------- slash command menu (/, /model, /thinking, /voz, /idioma, /novo) ---------- */
@@ -2462,7 +3319,7 @@
       const all = [
         { kind: 'goto-model', id: 'model', title: 'Modelo', desc: `Atual: ${state.model}`, icon: 'oc-robot' },
         { kind: 'goto-thinking', id: 'thinking', title: 'Thinking', desc: `Atual: ${state.design}`, icon: 'oc-brain-ai-3' },
-        { kind: 'voice', id: 'voz', title: 'Conversar por voz', desc: `Deepgram · ${state.voiceLang}`, icon: 'oc-pulse' },
+        { kind: 'voice', id: 'voz', title: 'Conversar por voz', desc: `${state.voiceProvider === 'openai' ? 'OpenAI' : 'Deepgram'} · ${state.voiceLang}`, icon: 'oc-pulse' },
         { kind: 'lang', id: 'idioma', title: 'Idioma da voz', desc: `Atual: ${state.voiceLang} · alterna ${SLASH_LANGS.join(', ')}`, icon: 'oc-global' },
         { kind: 'new', id: 'novo', title: 'Novo chat', desc: 'Começar uma conversa em branco', icon: 'oc-chat-new' },
       ];
@@ -2558,21 +3415,117 @@
       }
       return false;
     };
-    $('[data-action="attach"]', form)?.addEventListener('click', () => {
+    /* ---------- botão “+” e menu de contexto (modelo / thinking / arquivos) ---------- */
+    const attachWrap = $('[data-attach-wrap]', form);
+    const attachPanel = attachWrap ? $('[data-attach-panel]', attachWrap) : null;
+    const attachFileNames = [];
+
+    const appendFileNames = (names) => {
+      if (!names.length) return;
+      const previous = getComposerText(input);
+      setInputText(`${previous ? `${previous} ` : ''}${names.map((n) => `[anexo: ${n}]`).join(' ')}`);
+    };
+
+    const renderAttachFiles = () => {
+      if (!attachPanel) return;
+      const list = $('[data-attach-file-list]', attachPanel);
+      if (!list) return;
+      list.innerHTML = attachFileNames.map((name) => `<span class="zeno-attach-file-chip">${icon('oc-file-text', 'remixicon h-3.5 w-3.5')}<span>${esc(name)}</span></span>`).join('');
+    };
+
+    const pickFiles = () => {
       const picker = document.createElement('input');
       picker.type = 'file';
       picker.multiple = true;
       picker.style.display = 'none';
       picker.addEventListener('change', () => {
         const names = [...(picker.files || [])].map((f) => f.name).filter(Boolean);
-        if (names.length) {
-          const previous = getComposerText(input);
-          setInputText(`${previous ? `${previous} ` : ''}${names.map((n) => `[anexo: ${n}]`).join(' ')}`);
-        }
+        attachFileNames.push(...names.filter((n) => !attachFileNames.includes(n)));
+        appendFileNames(names);
+        renderAttachFiles();
         picker.remove();
       });
       document.body.appendChild(picker);
       picker.click();
+    };
+
+    const closeAttachPanel = () => {
+      if (!attachWrap) return;
+      attachWrap.classList.remove('is-open');
+      if (attachPanel) { attachPanel.hidden = true; attachPanel.innerHTML = ''; attachPanel.removeAttribute('data-attach-mode'); }
+    };
+
+    const syncAttachMenuLabels = () => {
+      if (!attachWrap) return;
+      const modelLabel = $('[data-attach-mode="model"] small', attachWrap);
+      if (modelLabel) modelLabel.textContent = state.model;
+      const thinkingLabel = $('[data-attach-mode="thinking"] small', attachWrap);
+      if (thinkingLabel) thinkingLabel.textContent = state.design;
+    };
+
+    const attachPanelHeader = (title) => `<div class="zeno-attach-panel-head"><button type="button" class="zeno-attach-back" data-attach-back aria-label="Voltar">${icon('oc-arrow-left-s', 'remixicon h-4 w-4')}</button><span>${esc(title)}</span></div>`;
+
+    const setupAttachDrop = () => {
+      const drop = $('[data-attach-drop]', attachPanel);
+      if (!drop) return;
+      ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (event) => { event.preventDefault(); drop.classList.add('is-over'); }));
+      ['dragleave', 'dragend'].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove('is-over')));
+      drop.addEventListener('drop', (event) => {
+        event.preventDefault();
+        drop.classList.remove('is-over');
+        const names = [...(event.dataTransfer?.files || [])].map((f) => f.name).filter(Boolean);
+        attachFileNames.push(...names.filter((n) => !attachFileNames.includes(n)));
+        appendFileNames(names);
+        renderAttachFiles();
+      });
+    };
+
+    const openAttachPanel = (mode) => {
+      if (!attachWrap || !attachPanel) return;
+      if (mode === 'model') {
+        attachPanel.innerHTML = `${attachPanelHeader('Modelo')}<div class="zeno-attach-options">${MODELS.map((name) => `<button type="button" class="zeno-attach-option ${name === state.model ? 'is-selected' : ''}" data-attach-model="${esc(name)}"><span class="zeno-attach-item-text"><strong>${esc(name)}</strong><small>${name === state.model ? 'Em uso' : 'Trocar para este modelo'}</small></span>${name === state.model ? icon('oc-check', 'remixicon h-4 w-4 zeno-attach-check') : ''}</button>`).join('')}</div>`;
+      } else if (mode === 'thinking') {
+        attachPanel.innerHTML = `${attachPanelHeader('Thinking')}<div class="zeno-attach-options">${DESIGN_OPTIONS.map(([name, description]) => `<button type="button" class="zeno-attach-option ${name === state.design ? 'is-selected' : ''}" data-attach-thinking="${esc(name)}"><span class="zeno-attach-item-text"><strong>${esc(name)}</strong><small>${esc(description)}</small></span>${name === state.design ? icon('oc-check', 'remixicon h-4 w-4 zeno-attach-check') : ''}</button>`).join('')}</div>`;
+      } else {
+        attachPanel.innerHTML = `${attachPanelHeader('Adicionar arquivos')}<div class="zeno-attach-drop" data-attach-drop>${icon('oc-file-add', 'remixicon h-5 w-5')}<strong>Solte arquivos aqui</strong><small>ou clique para escolher</small></div><button type="button" class="zeno-attach-browse" data-attach-browse>${icon('oc-add-circle', 'remixicon h-4 w-4')}Escolher arquivos</button><div class="zeno-attach-file-list" data-attach-file-list></div>`;
+      }
+      attachPanel.hidden = false;
+      attachPanel.dataset.attachMode = mode;
+      attachWrap.classList.add('is-open');
+      $('[data-attach-back]', attachPanel)?.addEventListener('click', closeAttachPanel);
+      $$('[data-attach-model]', attachPanel).forEach((button) => button.addEventListener('click', () => {
+        setModel(button.dataset.attachModel);
+        syncAttachMenuLabels();
+        closeAttachPanel();
+        flashComposerHint(form, `Modelo: ${button.dataset.attachModel}`);
+      }));
+      $$('[data-attach-thinking]', attachPanel).forEach((button) => button.addEventListener('click', () => {
+        setDesign(button.dataset.attachThinking);
+        syncAttachMenuLabels();
+        closeAttachPanel();
+        flashComposerHint(form, `Thinking: ${button.dataset.attachThinking}`);
+      }));
+      if (mode === 'files') {
+        $('[data-attach-drop]', attachPanel)?.addEventListener('click', pickFiles);
+        $('[data-attach-browse]', attachPanel)?.addEventListener('click', pickFiles);
+        renderAttachFiles();
+        setupAttachDrop();
+      }
+    };
+
+    if (attachWrap) {
+      $('[data-attach-mode="model"]', attachWrap)?.addEventListener('click', () => openAttachPanel('model'));
+      $('[data-attach-mode="thinking"]', attachWrap)?.addEventListener('click', () => openAttachPanel('thinking'));
+      $('[data-attach-mode="files"]', attachWrap)?.addEventListener('click', () => openAttachPanel('files'));
+      attachWrap.addEventListener('mouseleave', () => { if (attachWrap.classList.contains('is-open')) closeAttachPanel(); });
+    }
+    $('[data-action="attach"]', form)?.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (attachWrap && attachWrap.classList.contains('is-open')) closeAttachPanel();
+      else openAttachPanel('files');
+    });
+    form.addEventListener('click', (event) => {
+      if (attachWrap && attachWrap.classList.contains('is-open') && !attachWrap.contains(event.target)) closeAttachPanel();
     });
     $('[data-action="voice-mode"]', form)?.addEventListener('click', () => setVoiceMode(true));
     const send = $('[data-action="send"]', form);
@@ -2596,7 +3549,9 @@
         if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); applySlashItem(slash.items[slash.index]); return; }
         if (e.key === 'Escape') { e.preventDefault(); closeSlash(); return; }
       } else if (e.key === 'Escape' && slash) { e.preventDefault(); closeSlash(); return; }
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+      else if (e.key === 'Escape' && attachWrap?.classList.contains('is-open')) { e.preventDefault(); closeAttachPanel(); return; }
+      if (e.key === 'Enter' && !e.shiftKey && state.settingsChat.enterBehavior !== 'newline') { e.preventDefault(); submit(); return; }
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && state.settingsChat.enterBehavior === 'newline') { e.preventDefault(); submit(); }
     });
     const submit = () => {
       const text = getComposerText(input);
@@ -2663,35 +3618,33 @@
     bindDictation(rootEl);
   };
 
+  const settingsSig = () => state.settings
+    ? [state.settingsSection, state.colorMode, state.lightTheme, state.darkTheme,
+       state.voiceProvider, state.voiceLang, state.voiceName, state.appLang,
+       state.plugins.length, state.plugins.map((p) => `${p.id}:${p.enabled ? 1 : 0}:${p.name}`).join(','),
+       state.remotes.length, state.projects.length, state.projects.map((p) => `${p.id}:${p.name}:${(p.folders || []).join('|')}`).join(',')].join('|')
+    : '';
+
   const refreshSettingsContent = (rootEl) => {
     const content = $('[data-settings-content]', rootEl);
     if (content) content.innerHTML = tplSettingsSection();
     $$('[data-settings-section]', rootEl).forEach((x) => {
       x.classList.toggle('bg-interactive-hover', x.dataset.settingsSection === state.settingsSection);
     });
-    rootEl.dataset.sig = state.settings ? [state.settingsSection, state.colorMode, state.lightTheme, state.darkTheme].join('|') : '';
+    rootEl.dataset.sig = settingsSig();
+    bindSettingsSection(rootEl);
   };
 
-  const bindSettings = (rootEl) => {
-    $('[data-action="close-settings"]', rootEl)?.addEventListener('click', () => { state.settings = false; render(); });
-    rootEl.addEventListener('mousedown', (e) => { if (e.target === rootEl) { state.settings = false; render(); } });
-    $$('[data-settings-section]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      state.settingsSection = b.dataset.settingsSection;
-      refreshSettingsContent(rootEl);
-    }));
-    $$('[data-radio]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      state.colorMode = b.dataset.radio.toLowerCase();
-      LS.set('oc-clone-color-mode', state.colorMode);
-      applyTheme();
-      refreshSettingsContent(rootEl);
-    }));
+  /* Liga os controles da aba ativa (chamado a cada troca de seção). */
+  const bindSettingsSection = (rootEl) => {
+    /* Selects dropdown (light/dark theme, lang, timefmt, orientation, startup) */
     $$('[data-select-menu]', rootEl).forEach((b) => b.addEventListener('click', (e) => {
       e.stopPropagation();
       closeMenus();
       const key = b.dataset.selectMenu;
       const title = key === 'light-theme' ? 'Light Theme' : key === 'dark-theme' ? 'Dark Theme' : key === 'lang' ? 'Language' : key === 'timefmt' ? 'Time Format' : key === 'orientation' ? 'Install Orientation' : key === 'startup' ? 'Startup' : 'Options';
-      const opts = key === 'light-theme' ? themeList('light').map((t) => ({ id: t.id, name: t.name })) : key === 'dark-theme' ? themeList('dark').map((t) => ({ id: t.id, name: t.name })) : key === 'lang' ? [{ id: 'en', name: 'English' }] : key === 'timefmt' ? [{ id: 'auto', name: 'Auto' }] : key === 'orientation' ? [{ id: 'system', name: 'Follow system' }] : [{ id: 'last', name: 'Continue last session' }];
-      const current = key === 'light-theme' ? state.lightTheme : key === 'dark-theme' ? state.darkTheme : opts[0].id;
+      const opts = key === 'light-theme' ? themeList('light').map((t) => ({ id: t.id, name: t.name })) : key === 'dark-theme' ? themeList('dark').map((t) => ({ id: t.id, name: t.name })) : key === 'lang' ? [{ id: 'en', name: 'English' }, { id: 'pt', name: 'Português' }, { id: 'es', name: 'Español' }] : key === 'timefmt' ? [{ id: 'auto', name: 'Auto' }, { id: '12h', name: '12h' }, { id: '24h', name: '24h' }] : key === 'orientation' ? [{ id: 'system', name: 'Follow system' }, { id: 'portrait', name: 'Portrait' }, { id: 'landscape', name: 'Landscape' }] : [{ id: 'last', name: 'Continue last session' }, { id: 'new', name: 'Start new session' }];
+      const current = key === 'light-theme' ? state.lightTheme : key === 'dark-theme' ? state.darkTheme : key === 'lang' ? state.appLang : key === 'timefmt' ? state.timeFormat : key === 'orientation' ? state.installOrientation : opts[0].id;
       const rect = b.getBoundingClientRect();
       const menu = document.createElement('div');
       menu.innerHTML = tplSelectMenu(rect, title, opts, current, key);
@@ -2707,12 +3660,249 @@
         const val = o.dataset.value;
         if (key === 'light-theme') { state.lightTheme = val; LS.set('oc-clone-light-theme', val); }
         if (key === 'dark-theme') { state.darkTheme = val; LS.set('oc-clone-dark-theme', val); }
+        if (key === 'lang') { state.appLang = val; LS.set('oc-clone-app-lang', val); }
+        if (key === 'timefmt') { state.timeFormat = val; LS.set('oc-clone-time-format', val); }
+        if (key === 'orientation') { state.installOrientation = val; LS.set('oc-clone-install-orientation', val); }
         el.remove();
         applyTheme();
         refreshSettingsContent(rootEl);
+        render();
       }));
     }));
-    $('[data-action="reload-themes"]', rootEl)?.addEventListener('click', () => { applyTheme(); });
+    /* Toggles genéricos: chat.*, notif.*, voice.autoSpeak */
+    $$('[data-set-toggle]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      const path = b.dataset.setToggle;
+      if (path === 'chat.showSuggestions') { state.settingsChat.showSuggestions = !state.settingsChat.showSuggestions; LS.set('oc-clone-settings-chat', state.settingsChat); }
+      else if (path === 'chat.compactMode') { state.settingsChat.compactMode = !state.settingsChat.compactMode; LS.set('oc-clone-settings-chat', state.settingsChat); }
+      else if (path === 'notif.enabled') { state.settingsNotif.enabled = !state.settingsNotif.enabled; LS.set('oc-clone-settings-notif', state.settingsNotif); }
+      else if (path === 'notif.sound') { state.settingsNotif.sound = !state.settingsNotif.sound; LS.set('oc-clone-settings-notif', state.settingsNotif); }
+      else if (path === 'notif.mentionOnly') { state.settingsNotif.mentionOnly = !state.settingsNotif.mentionOnly; LS.set('oc-clone-settings-notif', state.settingsNotif); }
+      else if (path === 'notif.desktop') { state.settingsNotif.desktop = !state.settingsNotif.desktop; LS.set('oc-clone-settings-notif', state.settingsNotif); }
+      else if (path === 'voice.autoSpeak') { state.voiceAutoSpeak = state.voiceAutoSpeak === false; LS.set('oc-clone-voice-autospeak', state.voiceAutoSpeak); }
+      else return;
+      refreshSettingsContent(rootEl);
+      render();
+    }));
+    /* Selects/inputs: chat.*, voice.*, notif test, atalhos */
+    $$('[data-set-field]', rootEl).forEach((el) => el.addEventListener('change', () => {
+      const field = el.dataset.setField;
+      const value = el.value;
+      if (field === 'chat.fontSize') { state.settingsChat.fontSize = value; LS.set('oc-clone-settings-chat', state.settingsChat); }
+      else if (field === 'chat.enterBehavior') { state.settingsChat.enterBehavior = value; LS.set('oc-clone-settings-chat', state.settingsChat); }
+      else if (field === 'voice.provider') {
+        state.voiceProvider = value === 'openai' ? 'openai' : 'deepgram';
+        LS.set('oc-clone-voice-provider', state.voiceProvider);
+        if (state.voiceProvider === 'openai') {
+          if (state.voiceSttModel === 'nova-3' || state.voiceSttModel === 'nova-2') { state.voiceSttModel = 'whisper-1'; LS.set('oc-clone-voice-stt', state.voiceSttModel); }
+          if (state.voiceTtsModel === 'aura-asteria-en') { state.voiceTtsModel = 'tts-1'; LS.set('oc-clone-voice-tts', state.voiceTtsModel); }
+          if (state.voiceName === 'aura-asteria-en') { state.voiceName = 'alloy'; LS.set('oc-clone-voice-name', state.voiceName); }
+        }
+      }
+      else if (field === 'voice.lang') { state.voiceLang = value; LS.set('oc-clone-voice-lang', value); }
+      else if (field === 'voice.name') { state.voiceName = value; LS.set('oc-clone-voice-name', value); }
+      else if (field === 'voice.stt') { state.voiceSttModel = value; LS.set('oc-clone-voice-stt', value); }
+      else if (field === 'voice.tts') { state.voiceTtsModel = value; LS.set('oc-clone-voice-tts', value); }
+      else if (field === 'voice.openaiKey') { LS.set('oc-clone-voice-openai-key', value); }
+      else return;
+      refreshSettingsContent(rootEl);
+    }));
+    $$('[data-shortcut]', rootEl).forEach((el) => el.addEventListener('change', () => {
+      const key = el.dataset.shortcut;
+      if (state.shortcuts[key] === undefined) return;
+      state.shortcuts[key] = el.value.trim() || state.shortcuts[key];
+      LS.set('oc-clone-shortcuts', state.shortcuts);
+      refreshSettingsContent(rootEl);
+    }));
+    $('[data-action="notif-test"]', rootEl)?.addEventListener('click', () => {
+      try {
+        if (state.settingsNotif.desktop && 'Notification' in window) {
+          if (Notification.permission === 'granted') new Notification('Zeno Agent', { body: 'Notificações funcionando.' });
+          else if (Notification.permission !== 'denied') Notification.requestPermission().then((p) => { if (p === 'granted') new Notification('Zeno Agent', { body: 'Notificações funcionando.' }); });
+          else flashSettingsNote(rootEl, 'Permissão de notificação bloqueada no navegador.');
+        } else flashSettingsNote(rootEl, state.settingsNotif.enabled ? 'Notificações ativadas (banner do SO desligado).' : 'Ative “Enable notifications” primeiro.');
+      } catch { flashSettingsNote(rootEl, 'Notificações indisponíveis neste runtime.'); }
+    });
+    $('[data-action="voice-test"]', rootEl)?.addEventListener('click', async () => {
+      flashSettingsNote(rootEl, `Falando via ${state.voiceProvider === 'openai' ? 'OpenAI' : 'Deepgram'}…`);
+      await voiceSpeakNative(voiceGreeting());
+    });
+    $('[data-action="shortcuts-reset"]', rootEl)?.addEventListener('click', () => {
+      state.shortcuts = { newChat: 'Ctrl+N', palette: 'Ctrl+K', settings: 'Ctrl+,', voice: 'Ctrl+Shift+V' };
+      LS.set('oc-clone-shortcuts', state.shortcuts);
+      refreshSettingsContent(rootEl);
+    });
+    /* Projects: blocos editáveis */
+    $$('[data-project-name]', rootEl).forEach((el) => el.addEventListener('change', () => {
+      const project = state.projects.find((p) => p.id === el.dataset.projectName);
+      if (!project) return;
+      const name = el.value.trim();
+      if (!name) { el.value = project.name; return; }
+      project.name = name.slice(0, 120);
+      LS.set('oc-clone-projects', state.projects);
+      refreshSettingsContent(rootEl);
+      render();
+    }));
+    $$('[data-project-addfolder]', rootEl).forEach((el) => el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const project = state.projects.find((p) => p.id === el.dataset.projectAddfolder);
+      const folder = el.value.trim();
+      if (!project || !folder) return;
+      project.folders = [...(project.folders || []), folder].slice(0, 32);
+      LS.set('oc-clone-projects', state.projects);
+      refreshSettingsContent(rootEl);
+    }));
+    $$('[data-project-rmfolder]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      const project = state.projects.find((p) => p.id === b.dataset.projectRmfolder);
+      if (!project) return;
+      project.folders = (project.folders || []).filter((_, i) => i !== Number(b.dataset.folderIndex));
+      LS.set('oc-clone-projects', state.projects);
+      refreshSettingsContent(rootEl);
+    }));
+    $$('[data-project-newchat]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      const project = state.projects.find((p) => p.id === b.dataset.projectNewchat);
+      state.workspace = 'chat';
+      state.noteId = null;
+      state.panel = null;
+      state.activeProjectId = project ? project.id : null;
+      persistWorkspace();
+      createSession(state.activeProjectId);
+      state.settings = false;
+      render();
+    }));
+    $$('[data-project-delete]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      deleteProjectById(b.dataset.projectDelete);
+      refreshSettingsContent(rootEl);
+      render();
+    }));
+    $('[data-action="project-create-inline"]', rootEl)?.addEventListener('click', () => {
+      const project = { id: uid(), name: `Projeto ${state.projects.length + 1}`, folders: [], createdAt: new Date().toISOString() };
+      state.projects.push(project);
+      LS.set('oc-clone-projects', state.projects);
+      state.activeProjectId = project.id;
+      LS.set('oc-clone-active-project', state.activeProjectId);
+      refreshSettingsContent(rootEl);
+      render();
+    });
+    /* Remote instances: VPS, VM, Colab */
+    $('[data-remote-form]', rootEl)?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const type = $('[data-remote-type]', rootEl)?.value || 'vps';
+      const name = ($('[data-remote-name-input]', rootEl)?.value || '').trim();
+      const target = ($('[data-remote-target-input]', rootEl)?.value || '').trim();
+      const { remote, error } = remoteAdd(type, name, target);
+      const errEl = $('[data-remote-error]', rootEl);
+      if (error) { if (errEl) errEl.textContent = error; return; }
+      state.remotes.push(remote);
+      persistRemotes();
+      refreshSettingsContent(rootEl);
+    });
+    $$('[data-remote-name]', rootEl).forEach((el) => el.addEventListener('change', () => {
+      const remote = state.remotes.find((r) => r.id === el.dataset.remoteName);
+      if (!remote) return;
+      const name = el.value.trim();
+      if (!name) { el.value = remote.name; return; }
+      remote.name = name.slice(0, 80);
+      persistRemotes();
+      refreshSettingsContent(rootEl);
+    }));
+    $$('[data-remote-copy]', rootEl).forEach((b) => b.addEventListener('click', async () => {
+      const remote = state.remotes.find((r) => r.id === b.dataset.remoteCopy);
+      if (!remote) return;
+      try { await navigator.clipboard.writeText(remoteConnectCmd(remote)); flashSettingsNote(rootEl, 'Comando copiado.'); }
+      catch { flashSettingsNote(rootEl, remoteConnectCmd(remote)); }
+    }));
+    $$('[data-remote-delete]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      state.remotes = state.remotes.filter((r) => r.id !== b.dataset.remoteDelete);
+      persistRemotes();
+      refreshSettingsContent(rootEl);
+    }));
+    /* Plugins: ativar, desativar, renomear, criar */
+    $$('[data-plugin-toggle]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      const plugin = state.plugins.find((p) => p.id === b.dataset.pluginToggle);
+      if (!plugin) return;
+      plugin.enabled = !plugin.enabled;
+      persistPlugins();
+      applyPluginCss();
+      refreshSettingsContent(rootEl);
+      render();
+    }));
+    $$('[data-plugin-name]', rootEl).forEach((el) => el.addEventListener('change', () => {
+      const plugin = state.plugins.find((p) => p.id === el.dataset.pluginName);
+      if (!plugin) return;
+      const name = el.value.trim();
+      if (!name) { el.value = plugin.name; return; }
+      plugin.name = name.slice(0, 80);
+      persistPlugins();
+      refreshSettingsContent(rootEl);
+      render();
+    }));
+    $$('[data-plugin-json]', rootEl).forEach((b) => b.addEventListener('click', async () => {
+      const plugin = state.plugins.find((p) => p.id === b.dataset.pluginJson);
+      if (!plugin) return;
+      try { await navigator.clipboard.writeText(JSON.stringify(plugin, null, 2)); flashSettingsNote(rootEl, 'JSON copiado.'); }
+      catch { flashSettingsNote(rootEl, `Plugin ${plugin.id} v${plugin.version}.`); }
+    }));
+    $$('[data-plugin-delete]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      state.plugins = state.plugins.filter((p) => p.id !== b.dataset.pluginDelete);
+      persistPlugins();
+      applyPluginCss();
+      refreshSettingsContent(rootEl);
+      render();
+    }));
+    $('[data-plugin-form]', rootEl)?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const nameHint = ($('[data-plugin-req-name]', rootEl)?.value || '').trim();
+      const request = ($('[data-plugin-req-input]', rootEl)?.value || '').trim();
+      const errEl = $('[data-plugin-error]', rootEl);
+      const plugin = pluginCreate(request, nameHint);
+      if (!plugin) { if (errEl) errEl.textContent = 'Descreva o que o plugin deve fazer.'; return; }
+      if (state.plugins.some((p) => p.id === plugin.id)) plugin.id = `${plugin.id}-${uid().slice(0, 4)}`;
+      state.plugins.push(plugin);
+      persistPlugins();
+      applyPluginCss();
+      refreshSettingsContent(rootEl);
+      render();
+    });
+    /* Appearance: nome do app (o conteúdo é recriado a cada seção) */
+    $$('[data-settings-content] input[value="OpenChamber"]', rootEl).forEach((inp) => {
+      inp.value = state.installAppName;
+      inp.addEventListener('change', () => {
+        state.installAppName = inp.value.trim().slice(0, 60) || 'OpenChamber';
+        LS.set('oc-clone-install-app-name', state.installAppName);
+      });
+    });
+  };
+
+  const flashSettingsNote = (rootEl, text) => {
+    const content = $('[data-settings-content]', rootEl);
+    if (!content) return;
+    content.querySelector('[data-settings-note]')?.remove();
+    const note = document.createElement('div');
+    note.dataset.settingsNote = 'true';
+    note.className = 'zeno-composer-hint';
+    note.style.position = 'sticky';
+    note.textContent = text;
+    content.prepend(note);
+    setTimeout(() => note.remove(), 2600);
+  };
+
+  const bindSettings = (rootEl) => {
+    $('[data-action="close-settings"]', rootEl)?.addEventListener('click', () => { state.settings = false; render(); });
+    rootEl.addEventListener('mousedown', (e) => { if (e.target === rootEl) { state.settings = false; render(); } });
+    $$('[data-settings-section]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      state.settingsSection = b.dataset.settingsSection;
+      refreshSettingsContent(rootEl);
+    }));
+    $$('[data-radio]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      state.colorMode = b.dataset.radio.toLowerCase();
+      LS.set('oc-clone-color-mode', state.colorMode);
+      applyTheme();
+      refreshSettingsContent(rootEl);
+    }));
+    /* Appearance: os selects de idioma/formato/orientação usam o menu acima */
+    $('[data-action="reload-themes"]', rootEl)?.addEventListener('click', () => { applyTheme(); refreshSettingsContent(rootEl); render(); });
+    bindSettingsSection(rootEl);
   };
 
   const closeMenus = () => $$('[data-menu-popup]').forEach((m) => m.remove());
@@ -2737,21 +3927,45 @@
   const mockReply = (text) => {
     const t = text.toLowerCase();
     const time = fmtTime(now());
-    const dur = (1.2 + Math.random() * 6).toFixed(1) + 's';
     const base = {
-      role: 'assistant', time, model: state.model, agent: 'build', duration: dur,
+      role: 'assistant', time, model: state.model, agent: 'build',
       id: 'msg_' + uid(),
     };
+    /* Plugin builder: o agente gera o JSON, salva automaticamente e libera. */
+    if (/(criar?|crie|create|novo)\s+(um\s+|uma\s+)?plugin/i.test(t)) {
+      const hintMatch = text.match(/["“]([^"”]+)["”]/) || text.match(/chamad[oa]?\s+([^\n,.]+)/i) || text.match(/named?\s+([^\n,.]+)/i);
+      const plugin = pluginCreate(text, hintMatch ? hintMatch[1].trim() : '');
+      if (plugin) {
+        if (state.plugins.some((p) => p.id === plugin.id)) plugin.id = `${plugin.id}-${uid().slice(0, 4)}`;
+        state.plugins.push(plugin);
+        persistPlugins();
+        applyPluginCss();
+        return { ...base, thinking: `The user asked for a new plugin. I generated the ${plugin.id} JSON, validated the required fields, and saved it so it is available immediately.`, text: `Pronto! Criei e salvei o plugin **${plugin.name}** (\`${plugin.id}\`) — já está ativo e disponível para uso.\n\n\`\`\`json\n${JSON.stringify(plugin, null, 2)}\n\`\`\``, suggestion: 'Liste meus plugins ativos.' };
+      }
+    }
+    {
+      const toggle = t.match(/(ativar?|ative|desativar?|desative)\s+(o\s+)?plugin\s+([a-z0-9][a-z0-9-]*)/i);
+      if (toggle) {
+        const plug = state.plugins.find((p) => p.id === toggle[3].toLowerCase());
+        if (plug) {
+          plug.enabled = /desativ/i.test(toggle[1]) ? false : true;
+          persistPlugins();
+          applyPluginCss();
+          render();
+          return { ...base, text: `Plugin **${plug.name}** ${plug.enabled ? 'ativado' : 'desativado'}.`, suggestion: 'Liste meus plugins ativos.' };
+        }
+      }
+    }
     if (t.includes('array') || t.includes('foreach') || t.includes('map')) {
-      return { ...base, thinking: 'The user wants to iterate over an array. A classic for loop with an index is the most direct answer — access each element by position from 0 to length-1.', text: 'Percorrer um array com `for` acessa cada elemento pelo índice, do primeiro ao último.', code: { lang: 'js', lines: [['const', 'keyword'], [' ', null], ['nums', 'variable'], [' =', 'operator'], [' [1', 'number'], [',', 'operator'], [' 2', 'number'], [',', 'operator'], [' 3', 'number'], ['];', 'operator'], ['\n', null], ['for', 'keyword'], [' (', null], ['let', 'keyword'], [' ', null], ['i', 'variable'], [' =', 'operator'], [' 0', 'number'], [';', 'operator'], [' ', null], ['i', 'variable'], [' <', 'operator'], [' ', null], ['nums', 'variable'], ['.length', 'operator'], [';', 'operator'], [' ', null], ['i', 'variable'], ['++', 'operator'], [')', 'operator'], [' ', null], ['console.log', 'function'], ['(', null], ['nums', 'variable'], ['[', 'operator'], ['i', 'variable'], [']', 'operator'], [')', 'operator'], [';', 'operator']] }, recap: `Percorrer arrays com \`for\` clássico usa o índice \`i\` de 0 até \`array.length - 1\`, acessando \`array[i]\` a cada iteração.`, suggestion: 'E como fazer o mesmo com `forEach` ou `map`?' };
+      return { ...base, thinking: 'The user wants to iterate over an array. A classic for loop with an index is the most direct answer — access each element by position from 0 to length-1.', text: 'Percorrer um array com `for` acessa cada elemento pelo índice, do primeiro ao último.', code: { lang: 'js', lines: [['const', 'keyword'], [' ', null], ['nums', 'variable'], [' =', 'operator'], [' [1', 'number'], [',', 'operator'], [' 2', 'number'], [',', 'operator'], [' 3', 'number'], ['];', 'operator'], ['\n', null], ['for', 'keyword'], [' (', null], ['let', 'keyword'], [' ', null], ['i', 'variable'], [' =', 'operator'], [' 0', 'number'], [';', 'operator'], [' ', null], ['i', 'variable'], [' <', 'operator'], [' ', null], ['nums', 'variable'], ['.length', 'operator'], [';', 'operator'], [' ', null], ['i', 'variable'], ['++', 'operator'], [')', 'operator'], [' ', null], ['console.log', 'function'], ['(', null], ['nums', 'variable'], ['[', 'operator'], ['i', 'variable'], [']', 'operator'], [')', 'operator'], [';', 'operator']] }, suggestion: 'E como fazer o mesmo com `forEach` ou `map`?' };
     }
     if (t.includes('arquivo') || t.includes('file') || t.includes('list') || t.includes('bash') || t.includes('tool')) {
-      return { ...base, thinking: 'The user asks to list files. I should use the shell tool to run a directory listing and report the output back.', tools: [{ title: 'Shell Command', cmd: 'Get-ChildItem -Path "C:\\Users\\GM METELURGICA"', duration: '5.6s', output: DIR_OUTPUT }], text: 'Aqui está a listagem do diretório atual usando **Shell Command**:\n\nO diretório contém pastas de configuração e projetos, incluindo `Pictures`, `AppData`, `Downloads` e `.ollama`.', recap: 'Listagem do diretório via shell: contém .agents, .aws, .bun, .buzz, Pictures, AppData, Downloads e mais.', suggestion: 'Liste também os arquivos do projeto GUI Zeno.' };
+      return { ...base, thinking: 'The user asks to list files. I should use the shell tool to run a directory listing and report the output back.', tools: [{ title: 'Shell Command', cmd: 'Get-ChildItem -Path "C:\\Users\\GM METELURGICA"', duration: '5.6s', output: DIR_OUTPUT }], text: 'Aqui está a listagem do diretório atual usando **Shell Command**:\n\nO diretório contém pastas de configuração e projetos, incluindo `Pictures`, `AppData`, `Downloads` e `.ollama`.', suggestion: 'Liste também os arquivos do projeto GUI Zeno.' };
     }
     if (t.includes('função') || t.includes('function') || t.includes('python')) {
-      return { ...base, thinking: 'They want a function example. A named function with parameters and a return statement is the clearest illustration in JavaScript.', text: 'Uma **função** em JavaScript é um bloco reutilizável de código que recebe entradas (parâmetros) e pode devolver um resultado com `return`.', code: { lang: 'js', lines: [['function', 'keyword'], [' ', null], ['soma', 'variable'], ['(', null], ['a', 'variable'], [',', 'operator'], [' ', null], ['b', 'variable'], [')', 'operator'], [' ', null], ['{', 'operator'], ['\n', null], ['  ', null], ['return', 'keyword'], [' ', null], ['a', 'variable'], [' +', 'operator'], [' ', null], ['b', 'variable'], [';', 'operator'], ['\n', null], ['}', 'operator']] }, recap: 'Funções encapsulam lógica reutilizável com parâmetros e retorno via `return`.', suggestion: 'Explique arrow functions e quando usá-las.' };
+      return { ...base, thinking: 'They want a function example. A named function with parameters and a return statement is the clearest illustration in JavaScript.', text: 'Uma **função** em JavaScript é um bloco reutilizável de código que recebe entradas (parâmetros) e pode devolver um resultado com `return`.', code: { lang: 'js', lines: [['function', 'keyword'], [' ', null], ['soma', 'variable'], ['(', null], ['a', 'variable'], [',', 'operator'], [' ', null], ['b', 'variable'], [')', 'operator'], [' ', null], ['{', 'operator'], ['\n', null], ['  ', null], ['return', 'keyword'], [' ', null], ['a', 'variable'], [' +', 'operator'], [' ', null], ['b', 'variable'], [';', 'operator'], ['\n', null], ['}', 'operator']] }, suggestion: 'Explique arrow functions e quando usá-las.' };
     }
-    return { ...base, thinking: 'The request is open-ended. I will acknowledge it, restate the core ask briefly, and offer to go deeper with concrete examples.', text: 'Entendi seu pedido: **"' + text.slice(0, 60) + (text.length > 60 ? '…' : '') + '"**. Em resumo, é possível fazer isso de forma direta e eficiente, separando o problema em etapas pequenas e verificando cada resultado parcial antes de avançar. Se quiser, posso detalhar com exemplos de código.', recap: 'Resposta gerada para: "' + text.slice(0, 48) + '". Foco em solução direta com verificação por etapas.', suggestion: 'Pode dar um exemplo prático disso?' };
+    return { ...base, thinking: 'The request is open-ended. I will acknowledge it, restate the core ask briefly, and offer to go deeper with concrete examples.', text: 'Entendi seu pedido: **"' + text.slice(0, 60) + (text.length > 60 ? '…' : '') + '"**. Em resumo, é possível fazer isso de forma direta e eficiente, separando o problema em etapas pequenas e verificando cada resultado parcial antes de avançar. Se quiser, posso detalhar com exemplos de código.' + text.slice(0, 48) + '". Foco em solução direta com verificação por etapas.', suggestion: 'Pode dar um exemplo prático disso?' };
   };
 
   /* ---------- palette ---------- */
@@ -2776,7 +3990,7 @@
             ${s.id === state.activeId ? '<span class="ml-auto rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">active</span>' : ''}
           </button>`).join('')}
           <div class="mt-1 border-t border-border/60 pt-1">
-            ${[['oc-palette', 'Toggle theme'], ['oc-settings-3', 'Open settings']].map(([ic, label]) => `
+            ${[['oc-palette', 'Toggle theme'], ['oc-settings-3', 'Open settings'], ['oc-global', 'Toggle Browser panel']].map(([ic, label]) => `
             <button type="button" data-pal-cmd="${label}" class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-muted-foreground hover:text-foreground">
               ${icon(ic, 'remixicon h-4 w-4')}<span>${label}</span>
             </button>`).join('')}
@@ -2806,12 +4020,14 @@
       pal.remove();
       if (label === 'Toggle theme') { state.colorMode = state.colorMode === 'dark' ? 'light' : 'dark'; LS.set('oc-clone-color-mode', state.colorMode); applyTheme(); }
       if (label === 'Open settings') { state.settings = true; render(); }
+      if (label === 'Toggle Browser panel') { state.panel = state.panel === 'Browser' ? null : 'Browser'; LS.set('oc-clone-panel', state.panel); render(); }
     }));
   };
 
   /* ---------- boot ---------- */
   const boot = () => {
     applyTheme();
+    applyPluginCss();
     $('#root').innerHTML = `
       <div class="h-full text-foreground bg-background">
         <div class="main-content-safe-area relative flex h-[100dvh] bg-background">
@@ -2833,9 +4049,6 @@
                     <div data-panel-root class="flex min-h-0 bg-transparent">${tplPanel()}</div>
                   </div>
                 </div>
-                <div class="relative z-20 border-t border-border h-full bg-transparent">
-                  <div data-nav-root class="h-full bg-transparent">${tplNav()}</div>
-                </div>
               </div>
             </div>
           </div>
@@ -2843,16 +4056,12 @@
       </div>
       <div data-settings-root></div>
       <div data-action-modal-root></div>
-      <div data-variant-root></div>
-      <div data-voice-root></div>`;
+      <div data-variant-root></div>`;
 
     bindGlobal();
     const sb = $('[data-sidebar-root]');
     sb.innerHTML = tplSidebar();
     bindSidebar(sb);
-    const nav = $('[data-nav-root]');
-    nav.innerHTML = tplNav();
-    bindNav(nav);
     const panel = $('[data-panel-root]');
     panel.innerHTML = tplPanel();
     bindPanel(panel);
@@ -2868,21 +4077,33 @@
   };
 
   const bindGlobal = () => {
+    const matchShortcut = (e, combo) => {
+      const parts = String(combo || '').split('+').map((p) => p.trim().toLowerCase());
+      if (!parts.length) return false;
+      const key = parts[parts.length - 1];
+      const wantCtrl = parts.includes('ctrl') || parts.includes('cmd');
+      const wantShift = parts.includes('shift');
+      const wantAlt = parts.includes('alt');
+      if (wantCtrl && !(e.ctrlKey || e.metaKey)) return false;
+      if (wantShift && !e.shiftKey) return false;
+      if (wantAlt && !e.altKey) return false;
+      return e.key.toLowerCase() === key;
+    };
     $('[data-topbar-toggle]')?.addEventListener('click', () => {
       state.sidebarOpen = !state.sidebarOpen;
       refreshSidebar();
     });
     document.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      if (matchShortcut(e, state.shortcuts.palette || 'Ctrl+K')) {
         e.preventDefault();
         togglePalette();
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+      if (matchShortcut(e, state.shortcuts.settings || 'Ctrl+,')) {
         e.preventDefault();
         state.settings = !state.settings;
         render();
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+      if (matchShortcut(e, state.shortcuts.newChat || 'Ctrl+N')) {
         e.preventDefault();
         state.workspace = 'chat';
         state.noteId = null;
@@ -2890,6 +4111,10 @@
         state.draftNew = true;
         persistWorkspace();
         render();
+      }
+      if (matchShortcut(e, state.shortcuts.voice || 'Ctrl+Shift+V')) {
+        e.preventDefault();
+        setVoiceMode(!state.voiceMode);
       }
       if (e.key === 'Escape') {
         if (state.voiceMode) { setVoiceMode(false); return; }

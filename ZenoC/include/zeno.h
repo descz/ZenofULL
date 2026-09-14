@@ -314,6 +314,7 @@ int zeno_router_add_provider(ZenoRouter *router, ZenoProviderConfig provider);
 void zeno_router_set_fallback_models(ZenoRouter *router, const char *models_csv);
 void zeno_router_set_transport(ZenoRouter *router, ZenoTransport transport,
                                void *context);
+void zeno_set_request_session(const char *session_id);
 int zeno_router_has_providers(const ZenoRouter *router);
 int zeno_router_complete(ZenoRouter *router, const char *preferred_model,
                          const char *messages_json, const char *tools_json,

@@ -247,7 +247,7 @@ static void bridge_apply_zeno_config(void) {
     g_bridge.zeno.caveman_mode = 0;
     g_bridge.zeno.agent_mode = g_bridge.cfg.agent_mode;
     g_bridge.zeno.sandbox_allow_shell_operators = 1;
-    g_bridge.zeno.llm_timeout_ms = 180000;
+    g_bridge.zeno.llm_timeout_ms = 300000;
 }
 
 void zeno_bridge_init(const char *base_dir) {
@@ -412,6 +412,24 @@ static int bridge_memory_link_tool(void *context, const char *args_json, char **
     return 1;
 }
 
+/* Registra memory_link em um registry (usado no run e na listagem de tools). */
+static int bridge_register_memory_link_tool(ZenoRegistry *registry, char **error) {
+    ZenoToolDefinition definition;
+    memset(&definition, 0, sizeof(definition));
+    definition.name = "memory_link";
+    definition.description = "Link two durable memory notes in the workspace knowledge graph (from/to are note ids returned by memory_remember or memory_list).";
+    definition.parameters_json = "{\"type\":\"object\",\"properties\":{\"from\":{\"type\":\"string\"},\"to\":{\"type\":\"string\"},\"label\":{\"type\":\"string\"}},\"required\":[\"from\",\"to\"]}";
+    definition.effect = ZENO_EFFECT_WRITE_LOCAL;
+    definition.requires_approval = 0;
+    definition.timeout_ms = 5000;
+    definition.max_retries = 0;
+    if (!zeno_registry_register(registry, definition, bridge_memory_link_tool, NULL)) {
+        if (error != NULL) *error = zeno_strdup("Falha ao registrar a ferramenta memory_link.");
+        return 0;
+    }
+    return 1;
+}
+
 static ZenoRouter *bridge_build_router(void) {
     ZenoRouter *router = zeno_router_create();
     if (router == NULL) return NULL;
@@ -486,21 +504,9 @@ static int bridge_runtime_build(BridgeRuntime *runtime, char **error) {
             free(plugins_dir);
         }
     }
-    {
-        ZenoToolDefinition definition;
-        memset(&definition, 0, sizeof(definition));
-        definition.name = "memory_link";
-        definition.description = "Link two durable memory notes in the workspace knowledge graph (from/to are note ids returned by memory_remember or memory_list).";
-        definition.parameters_json = "{\"type\":\"object\",\"properties\":{\"from\":{\"type\":\"string\"},\"to\":{\"type\":\"string\"},\"label\":{\"type\":\"string\"}},\"required\":[\"from\",\"to\"]}";
-        definition.effect = ZENO_EFFECT_WRITE_LOCAL;
-        definition.requires_approval = 0;
-        definition.timeout_ms = 5000;
-        definition.max_retries = 0;
-        if (!zeno_registry_register(runtime->registry, definition, bridge_memory_link_tool, NULL)) {
-            if (error != NULL) *error = zeno_strdup("Falha ao registrar a ferramenta memory_link.");
-            bridge_runtime_destroy(runtime);
-            return 0;
-        }
+    if (registered && !bridge_register_memory_link_tool(runtime->registry, error)) {
+        bridge_runtime_destroy(runtime);
+        return 0;
     }
     if (!registered) {
         if (error != NULL) *error = zeno_strdup("Falha ao registrar as ferramentas do ZenoC.");
@@ -809,9 +815,25 @@ char *zeno_bridge_memory_notes_json(void) {
     free(json);
     if (root == NULL) return zeno_strdup("[]");
     ZjNode *notes = zj_object_get(root, "notes");
-    char *result = notes != NULL && notes->type == ZJ_ARRAY ? zj_stringify_compact(notes) : zeno_strdup("[]");
+    if (notes == NULL || notes->type != ZJ_ARRAY) { zj_free(root); return zeno_strdup("[]"); }
+    /* A UI mostra memórias/notas do usuário; kinds internos do runtime
+     * (session, tool_sequence) ficam no store para o agente, mas não entram
+     * no grafo da interface. */
+    char *filtered = zeno_strdup("[");
+    if (filtered != NULL) {
+        for (size_t i = 0; i < notes->count; i++) {
+            ZjNode *note = zj_array_get(notes, i);
+            if (note == NULL) continue;
+            const char *kind = zj_string(zj_object_get(note, "kind"));
+            if (kind != NULL && (!strcmp(kind, "session") || !strcmp(kind, "tool_sequence"))) continue;
+            char *item = zj_stringify_compact(note);
+            char *next = item != NULL ? zeno_json_array_append(filtered, item) : NULL;
+            free(item);
+            if (next != NULL) filtered = next;
+        }
+    }
     zj_free(root);
-    return result != NULL ? result : zeno_strdup("[]");
+    return filtered != NULL ? filtered : zeno_strdup("[]");
 }
 
 static char *bridge_note_add_locked(const char *title, const char *content, const char *kind,
@@ -1387,6 +1409,8 @@ char *zeno_bridge_tools_json(void) {
         int registered = g_bridge.cfg.agent_mode == ZENO_AGENT_MODE_MINIMAL
             ? zeno_registry_register_minimal(registry, sandbox, memory, g_bridge.cfg.workspace)
             : zeno_registry_register_builtins(registry, sandbox, memory, g_bridge.cfg.workspace);
+        /* memory_link também faz parte do arsenal do agente. */
+        if (registered && !bridge_register_memory_link_tool(registry, NULL)) registered = 0;
         if (registered) result = zeno_registry_list_json(registry);
     }
     zeno_registry_destroy(registry);

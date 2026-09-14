@@ -31,6 +31,18 @@
 #define ZENO_HAS_HTTP_TRANSPORT 1
 #endif
 
+/* Header de sessão por thread (ex.: x-opencode-session exigido pelo provider
+ * opencode-go). _Thread_local evita corrida entre runs paralelos. */
+static _Thread_local char tls_request_session[160] = {0};
+
+void zeno_set_request_session(const char *session_id) {
+    if (session_id == NULL || *session_id == '\0') { tls_request_session[0] = '\0'; return; }
+    size_t length = strlen(session_id);
+    if (length >= sizeof(tls_request_session)) length = sizeof(tls_request_session) - 1;
+    memcpy(tls_request_session, session_id, length);
+    tls_request_session[length] = '\0';
+}
+
 static void sort_providers(ZenoRouter *router);
 static char *provider_model_from(const char *models_csv, const char *preferred,
                             const char *fallbacks);
@@ -627,6 +639,7 @@ static int curl_stream_transport(const char *base_url, const char *api_key,
     CURL *curl = curl_easy_init(); if (curl == NULL) { if (error_message != NULL) *error_message = zeno_strdup("libcurl initialization failed"); return 0; }
     char *url = zeno_format("%s%s", base_url != NULL ? base_url : "", base_url != NULL && *base_url != '\0' && base_url[strlen(base_url) - 1] == '/' ? "chat/completions" : "/chat/completions");
     struct curl_slist *headers = NULL; headers = curl_slist_append(headers, "Content-Type: application/json");
+    if (tls_request_session[0] != '\0') { char *session_header = zeno_format("x-opencode-session: %s", tls_request_session); if (session_header != NULL) { headers = curl_slist_append(headers, session_header); free(session_header); } }
     if (api_key != NULL && *api_key != '\0') { char *authorization = zeno_format("Authorization: Bearer %s", api_key); if (authorization != NULL) { headers = curl_slist_append(headers, authorization); free(authorization); } }
     curl_easy_setopt(curl, CURLOPT_URL, url != NULL ? url : ""); curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS); curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS); curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L); curl_easy_setopt(curl, CURLOPT_POST, 1L); curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers); curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body_json != NULL ? body_json : "{}"); curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long)(timeout_ms > 0 ? timeout_ms : 120000)); curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, sse_curl_write); curl_easy_setopt(curl, CURLOPT_WRITEDATA, accum); curl_easy_setopt(curl, CURLOPT_USERAGENT, "ZenoC/1.0");
     CURLcode code = curl_easy_perform(curl); long status = 0; (void)curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
@@ -727,6 +740,7 @@ static int curl_transport(void *context, const char *base_url, const char *api_k
     CURL *curl = curl_easy_init(); if (curl == NULL) { if (error_message != NULL) *error_message = zeno_strdup("libcurl initialization failed"); return 0; }
     char *url = zeno_format("%s%s", base_url != NULL ? base_url : "", base_url != NULL && *base_url != '\0' && base_url[strlen(base_url) - 1] == '/' ? "chat/completions" : "/chat/completions");
     struct curl_slist *headers = NULL; headers = curl_slist_append(headers, "Content-Type: application/json");
+    if (tls_request_session[0] != '\0') { char *session_header = zeno_format("x-opencode-session: %s", tls_request_session); if (session_header != NULL) { headers = curl_slist_append(headers, session_header); free(session_header); } }
     if (api_key != NULL && *api_key != '\0') { char *authorization = zeno_format("Authorization: Bearer %s", api_key); if (authorization != NULL) { headers = curl_slist_append(headers, authorization); free(authorization); } }
     HttpBuffer buffer = {0}; buffer.max_chars = 16U * 1024U * 1024U;
     curl_easy_setopt(curl, CURLOPT_URL, url != NULL ? url : ""); curl_easy_setopt(curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS); curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS); curl_easy_setopt(curl, CURLOPT_POST, 1L); curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers); curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body_json != NULL ? body_json : "{}"); curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long)(timeout_ms > 0 ? timeout_ms : 120000)); curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write); curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer); curl_easy_setopt(curl, CURLOPT_USERAGENT, "ZenoC/1.0");
@@ -888,7 +902,13 @@ static int winhttp_transport(void *context, const char *base_url, const char *ap
     }
     char *url = zeno_format("%s%s", base_url, base_url[strlen(base_url) - 1] == '/' ? "chat/completions" : "/chat/completions");
     if (url == NULL) { if (error_message != NULL) *error_message = zeno_strdup("Out of memory"); return 0; }
-    char *headers = api_key != NULL && *api_key != '\0' ? zeno_format("{\"Authorization\":\"Bearer %s\",\"Content-Type\":\"application/json\"}", api_key) : zeno_strdup("{\"Content-Type\":\"application/json\"}");
+    char *headers = NULL;
+    if (api_key != NULL && *api_key != '\0' && tls_request_session[0] != '\0') {
+        char *session_json = zeno_json_escape(tls_request_session);
+        headers = session_json != NULL ? zeno_format("{\"Authorization\":\"Bearer %s\",\"x-opencode-session\":%s,\"Content-Type\":\"application/json\"}", api_key, session_json) : NULL;
+        free(session_json);
+    }
+    if (headers == NULL) headers = api_key != NULL && *api_key != '\0' ? zeno_format("{\"Authorization\":\"Bearer %s\",\"Content-Type\":\"application/json\"}", api_key) : zeno_strdup("{\"Content-Type\":\"application/json\"}");
     char *raw = NULL; long status = 0; char *error = NULL;
     int ok = headers != NULL && winhttp_exchange(url, "POST", headers, body_json, timeout_ms, ZENO_MAX_HTTP_RESPONSE, &raw, &status, &error);
     free(url); free(headers);

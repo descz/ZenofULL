@@ -22,3 +22,25 @@ CMakeFiles/
 # Sistema
 Thumbs.db
 Desktop.ini
+
+# ===== Zeno: runtime / dev (não versionar) =====
+# secrets & estado do agente
+zeno-agent.json
+zeno-config.json
+ZenoC_memory.md
+ZenoC_memory_links.md
+.zeno/
+.zeno_runs/
+
+# dev/testes locais e mocks
+_*.mjs
+_*.c
+_*.png
+_*.json
+*.html
+node_modules/
+package-lock.json
+_shots/
+TRANSCRIPT.md
+result.txt
+pi-session-*.html

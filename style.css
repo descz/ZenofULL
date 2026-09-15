@@ -961,8 +961,9 @@ body:has(.memory-view) [data-panel-root] {
 }
 .memory-edge {
   fill: none;
-  stroke: #fff;
-  stroke-width: 1.35;
+  stroke: #2dd4a8;
+  stroke-opacity: .3;
+  stroke-width: 1.1;
   stroke-linecap: round;
   shape-rendering: geometricPrecision;
 }
@@ -975,11 +976,19 @@ body:has(.memory-view) [data-panel-root] {
   cursor: grabbing;
 }
 .memory-node-shape {
-  fill: #050505;
-  stroke: #fff;
-  stroke-width: 1.7;
+  fill: color-mix(in srgb, var(--memory-node-accent, #ffffff) 26%, #10151d);
+  stroke: var(--memory-node-accent, #fff);
+  stroke-width: 1.6;
   shape-rendering: geometricPrecision;
   transition: fill 140ms ease, stroke-width 140ms ease;
+}
+.memory-node-halo {
+  fill: var(--memory-node-accent, #fff);
+  opacity: .13;
+  pointer-events: none;
+}
+.memory-node-root .memory-node-halo {
+  opacity: .2;
 }
 .memory-node-actions {
   opacity: 0;
@@ -1011,8 +1020,19 @@ body:has(.memory-view) [data-panel-root] {
 .memory-node:hover .memory-node-shape,
 .memory-node:focus-visible .memory-node-shape,
 .memory-node.is-dragging .memory-node-shape {
-  fill: #fff;
+  fill: var(--memory-node-accent, #fff);
   stroke-width: 2;
+}
+.memory-node-title {
+  fill: #fff;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  paint-order: stroke;
+  stroke: #030303;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
 }
 .memory-node-topline,
 .memory-node-meta {
@@ -1209,6 +1229,109 @@ body:has(.memory-view) [data-panel-root] {
   color: #d5d9e2;
   background: transparent;
   font: 14px/1.75 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.memory-editor-content.is-json {
+  font: 12.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #9fe8c0;
+}
+.memory-editor-kind {
+  height: 31px;
+  padding: 0 7px;
+  border: 1px solid rgb(255 255 255 / .18);
+  border-radius: 7px;
+  color: #e8eaf0;
+  background: #101216;
+  font-size: 11px;
+  outline: none;
+}
+.memory-json-view {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid rgb(255 255 255 / .1);
+  border-radius: 9px;
+  background: rgb(74 222 128 / .05);
+  color: #b9ead0;
+  font: 12.5px/1.7 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.memory-config-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.memory-config-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  width: 250px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgb(255 255 255 / .14);
+  border-radius: 11px;
+  background: #0b0e13;
+  box-shadow: 0 18px 50px rgb(0 0 0 / .55);
+}
+.memory-config-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #cfd4de;
+  font-size: 11px;
+}
+.memory-config-row input[type="color"] {
+  width: 26px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / .2);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+.memory-config-row input[type="range"] {
+  flex: 1;
+  margin-left: auto;
+}
+.memory-config-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--memory-node-accent, #fff);
+  box-shadow: 0 0 8px var(--memory-node-accent, #fff);
+}
+.memory-config-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #cfd4de;
+  font-size: 11px;
+  cursor: pointer;
+}
+.memory-config-check input { accent-color: #2dd4a8; }
+.memory-config-hint {
+  color: rgb(255 255 255 / .45);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.memory-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 6px;
+}
+.memory-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: rgb(255 255 255 / .55);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
 }
 .memory-editor-save,
 .memory-editor-discard,
@@ -2481,3 +2604,216 @@ body.zeno-compact #chat-root .chat-message-column { padding-top: 2px; padding-bo
   background: transparent;
 }
 .memory-backend-bar .zeno-mini-btn:hover { background: rgb(255 255 255 / .08); }
+
+/* ---------- settings: grid de blocos (Projects / Remote / Plugins) ---------- */
+.zeno-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  max-width: none;
+}
+@media (max-width: 980px) { .zeno-settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .zeno-settings-grid { grid-template-columns: 1fr; } }
+.zeno-settings-grid .zeno-setting-block { min-width: 0; }
+.zeno-add-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 92px;
+  border-style: dashed;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: center;
+  transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
+}
+.zeno-add-block:hover { border-color: var(--primary); color: var(--foreground); background: var(--interactive-hover); }
+.zeno-blocks-empty {
+  grid-column: 1 / -1;
+  padding: 28px 12px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+  border: 1px dashed var(--interactive-border);
+  border-radius: 12px;
+}
+.zeno-block-name {
+  display: block;
+  min-width: 0;
+  max-width: calc(100% - 64px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.zeno-block-name-input {
+  min-width: 0;
+  flex: 1 1 auto;
+  max-width: calc(100% - 64px);
+  border: none;
+  border-bottom: 1px solid var(--primary);
+  background: transparent;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+  padding: 0 2px 1px;
+}
+.zeno-block-actions { display: inline-flex; align-items: center; gap: 2px; }
+.zeno-block-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  width: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.zeno-block-actions button:hover { background: var(--interactive-hover); color: var(--foreground); }
+.zeno-block-actions button.is-danger:hover { color: #ff8a80; background: rgb(255 95 86 / 0.12); }
+
+/* ---------- settings: overlay de confirmação ---------- */
+.zeno-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(2px);
+  animation: zenoFadeIn 140ms ease-out;
+}
+.zeno-confirm-card {
+  width: min(360px, calc(100vw - 48px));
+  border: 1px solid var(--interactive-border);
+  border-radius: 14px;
+  background: var(--surface-elevated, #141414);
+  color: var(--foreground);
+  padding: 18px;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 0.45);
+  animation: zenoPopIn 150ms ease-out;
+}
+.zeno-confirm-card h3 { margin: 0; font-size: 14.5px; font-weight: 600; }
+.zeno-confirm-card p { margin: 8px 0 0; font-size: 12.5px; color: var(--muted-foreground); }
+.zeno-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.zeno-confirm-btn {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--interactive-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.zeno-confirm-btn:hover { background: var(--interactive-hover); }
+.zeno-confirm-btn.is-danger { background: #ff5f56; border-color: #ff5f56; color: #fff; font-weight: 600; }
+.zeno-confirm-btn.is-danger:hover { background: #ff4740; }
+@keyframes zenoFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes zenoPopIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+
+/* ---------- settings: seletor segmentado (✓ no item escolhido) ---------- */
+.zeno-seg-group {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--interactive-border);
+  border-radius: 10px;
+  background: var(--surface-elevated);
+}
+.zeno-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.zeno-seg:hover { color: var(--foreground); background: var(--interactive-hover); }
+.zeno-seg.is-on { background: var(--primary); color: var(--primary-foreground, #fff); font-weight: 600; }
+
+/* ---------- settings: Usage ---------- */
+.zeno-usage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--interactive-border);
+  border-radius: 12px;
+  background: var(--surface-elevated);
+  padding: 12px 14px;
+}
+.zeno-usage-card-num { font-size: 19px; font-weight: 700; color: var(--foreground); font-variant-numeric: tabular-nums; }
+.zeno-usage-card-label { font-size: 11px; color: var(--muted-foreground); }
+.zeno-usage-chart {
+  border: 1px solid var(--interactive-border);
+  border-radius: 12px;
+  background: var(--surface-elevated);
+  padding: 16px;
+  min-height: 120px;
+}
+.zeno-usage-svg { width: 100%; max-width: 560px; height: auto; }
+.zeno-usage-label { fill: var(--muted-foreground); font-size: 10.5px; }
+.zeno-usage-value { fill: var(--foreground); font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.zeno-usage-axis { fill: var(--muted-foreground); font-size: 9px; }
+.zeno-usage-donut { width: 150px; height: 150px; flex: 0 0 auto; }
+.zeno-usage-donut-total { fill: var(--foreground); font-size: 15px; font-weight: 700; }
+.zeno-usage-donut-sub { fill: var(--muted-foreground); font-size: 9.5px; }
+.zeno-usage-legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--foreground); }
+.zeno-usage-dot { height: 9px; width: 9px; border-radius: 999px; flex: 0 0 auto; }
+.zeno-usage-legend-num { color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.zeno-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: 1px solid var(--interactive-border);
+  border-radius: 10px;
+  background: var(--surface-elevated);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+.zeno-usage-row:hover { border-color: var(--primary); background: var(--interactive-hover); }
+.zeno-usage-row-title { display: block; font-size: 13px; font-weight: 500; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zeno-usage-row-sub { display: block; margin-top: 2px; font-size: 11px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zeno-usage-row-nums { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: 0 0 auto; }
+.zeno-usage-row-tokens { font-size: 11px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.zeno-usage-row-cost { font-size: 13px; font-weight: 700; color: var(--foreground); font-variant-numeric: tabular-nums; }
+.zeno-usage-empty { padding: 18px 6px; text-align: center; font-size: 12.5px; color: var(--muted-foreground); }
+
+/* ---------- settings: estado do plugin ---------- */
+.zeno-plugin-state {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--interactive-border);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+}
+.zeno-plugin-state.is-on { color: #4ade80; border-color: rgb(74 222 128 / 0.4); }
+
+/* ---------- chat: tamanho de fonte de verdade (variável do markdown) ---------- */
+body[data-chat-font="small"] { --text-markdown: 0.8125rem; }
+body[data-chat-font="medium"] { --text-markdown: 0.9375rem; }
+body[data-chat-font="large"] { --text-markdown: 1.125rem; }

@@ -214,6 +214,109 @@
     ['Max', 'Máxima profundidade e verificação para tarefas críticas.'],
   ];
 
+  /* ---------- Usage: preço (USD / 1M tokens) e agregação ---------- */
+  const USAGE_PRICES = {
+    'gpt-4o-mini': [0.15, 0.6], 'gpt-4o': [2.5, 10], 'gpt-4.1': [2, 8], 'gpt-4.1-mini': [0.4, 1.6],
+    'gpt-5': [1.25, 10], 'gpt-5-mini': [0.25, 2], 'gpt-5.6-luna': [1.25, 10], 'o3': [2, 8], 'o4-mini': [1.1, 4.4],
+    'claude-sonnet-4-5': [3, 15], 'claude-opus-4-1': [15, 75], 'claude-haiku-4-5': [1, 5],
+    'gemini-2.5-flash': [0.3, 2.5], 'gemini-2.5-pro': [1.25, 10],
+    'deepseek-v4-pro': [0.27, 1.1], 'deepseek-v4-flash': [0.1, 0.4], 'deepseek-v4.1-flash': [0.1, 0.4],
+    'deepseek-flash': [0.1, 0.4], 'deepseek-v4-flash-vision-exp': [0.1, 0.4], 'deepseek-chat': [0.27, 1.1], 'deepseek-reasoner': [0.55, 2.2],
+    'glm-5.3-flash': [0.14, 0.56], 'glm-5': [0.6, 2.2], 'glm-5.1': [0.5, 2], 'glm-5.2': [0.5, 2], 'glm-5.3': [0.6, 2.2],
+    'kimi-k3': [0.6, 2.5], 'kimi-k2.7-code': [0.55, 2.2], 'kimi-k2.6': [0.55, 2.2], 'kimi-k2.5': [0.5, 2], 'kimi-k2': [0.5, 2],
+    'minimax-m3': [0.3, 1.2], 'minimax-m2.7': [0.3, 1.2], 'minimax-m2.5': [0.3, 1.2], 'minimax-m2': [0.3, 1.2],
+    'qwen3.7-max': [1.2, 6], 'qwen3.8-max': [1.2, 6], 'qwen3.8-flash': [0.22, 0.88],
+    'qwen3.7-plus': [0.4, 2], 'qwen3.6-plus': [0.4, 2], 'qwen3.5-plus': [0.4, 2],
+    'longcat-2.0': [0.3, 1.2], 'mimo-v2-pro': [0.4, 1.6], 'mimo-v2-omni': [0.4, 1.6], 'mimo-v2.5-pro': [0.4, 1.6], 'mimo-v2.5': [0.35, 1.4],
+    'grok-4.5': [3, 15], 'grok-4.6': [3, 15], 'hy3': [0.6, 2.2], 'hy3-preview': [0.6, 2.2], 'hy4-preview': [0.9, 3.6],
+    'omen-alpha': [2, 8], 'muse-spark-1.3-contributor': [0.5, 2], 'muse-spark-1.2-contributor': [0.5, 2],
+  };
+  const usagePrice = (model) => {
+    const key = String(model || '').toLowerCase().trim();
+    if (USAGE_PRICES[key]) return USAGE_PRICES[key];
+    const hit = Object.keys(USAGE_PRICES).find((k) => key.includes(k) || (key.length > 3 && k.includes(key)));
+    return hit ? USAGE_PRICES[hit] : [0.5, 1.5];
+  };
+  const usageCostOf = (model, tin, tout) => {
+    const [pin, pout] = usagePrice(model);
+    return ((tin || 0) / 1e6) * pin + ((tout || 0) / 1e6) * pout;
+  };
+  const fmtUSD = (v) => `$${(v || 0) > 0 && (v || 0) < 0.01 ? (v).toFixed(4) : (v || 0).toFixed(2)}`;
+  const fmtTokens = (v) => {
+    const n = Number(v) || 0;
+    if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+    if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+    return String(n);
+  };
+  const usageAggregate = () => {
+    const byModel = new Map();
+    const sessions = state.sessions.map((session) => {
+      let tokensIn = 0, tokensOut = 0, cost = 0, runs = 0;
+      const models = new Set();
+      (session.messages || []).forEach((m) => {
+        if (m.role !== 'assistant') return;
+        const tin = Number(m.tokensIn) || 0;
+        const tout = Number(m.tokensOut) || 0;
+        if (!tin && !tout) return;
+        runs++;
+        tokensIn += tin;
+        tokensOut += tout;
+        const model = m.model || state.model || 'desconhecido';
+        models.add(model);
+        cost += usageCostOf(model, tin, tout);
+        const entry = byModel.get(model) || { model, tokensIn: 0, tokensOut: 0, cost: 0, runs: 0 };
+        entry.tokensIn += tin;
+        entry.tokensOut += tout;
+        entry.cost += usageCostOf(model, tin, tout);
+        entry.runs++;
+        byModel.set(model, entry);
+      });
+      return {
+        id: session.id, title: session.title || 'Sem título', tokensIn, tokensOut, cost, runs,
+        models: [...models], updatedAt: session.updatedAt || session.createdAt || '',
+      };
+    }).filter((s) => s.runs > 0).sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1));
+    const models = [...byModel.values()].sort((a, b) => b.cost - a.cost);
+    const total = {
+      cost: models.reduce((t, m) => t + m.cost, 0),
+      tokensIn: models.reduce((t, m) => t + m.tokensIn, 0),
+      tokensOut: models.reduce((t, m) => t + m.tokensOut, 0),
+      runs: models.reduce((t, m) => t + m.runs, 0),
+    };
+    return { sessions, models, total };
+  };
+  const usageDailySeries = () => {
+    const days = new Map();
+    const key = (ts) => {
+      const d = new Date(ts);
+      return d.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+    };
+    state.sessions.forEach((session) => {
+      const fallback = session.updatedAt || session.createdAt;
+      (session.messages || []).forEach((m) => {
+        if (m.role !== 'assistant') return;
+        const tin = Number(m.tokensIn) || 0;
+        const tout = Number(m.tokensOut) || 0;
+        if (!tin && !tout) return;
+        const ts = m.createdAt || fallback;
+        if (!ts) return;
+        const day = key(ts);
+        days.set(day, (days.get(day) || 0) + usageCostOf(m.model || state.model, tin, tout));
+      });
+    });
+    const list = [...days.entries()].map(([day, cost]) => ({ day, cost }));
+    /* Preenche os últimos 14 dias (custo zero) para o eixo ficar contínuo. */
+    const out = [];
+    const today = new Date();
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(today.getTime() - i * 86400000);
+      const k = d.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+      const hit = list.find((x) => x.day === k);
+      out.push({ day: k, cost: hit ? hit.cost : 0 });
+    }
+    return out;
+  };
+
   const FILES_TREE = [
     ['oc-folder', 'packages', true, [
       ['oc-folder', 'ui', true, [
@@ -387,7 +490,9 @@
     panel: LS.get('oc-clone-panel', null),
     panelW: LS.get('oc-clone-panel-w', 502),
     settings: false,
-    settingsSection: 'Appearance',
+    settingsSection: 'Chat',
+    usageChart: LS.get('oc-clone-usage-chart', 'bars'),
+    remoteFormOpen: false,
     expandedTools: {},
     traceExpanded: {},
     traceFilter: 'all',
@@ -404,6 +509,10 @@
     activeProjectId: LS.get('oc-clone-active-project', null),
     memoryNotes: LS.get('oc-clone-memory-notes', MEMORY_NOTES),
     memoryEdges: LS.get('oc-clone-memory-edges', MEMORY_EDGES),
+    /* Config visual da rede de memória (cores por tipo, espaçamento, rótulos) */
+    memoryConfig: { mcp: '#4ade80', skill: '#63b3ff', spacing: 1, labels: false, ...LS.get('oc-clone-memory-config', {}) },
+    memoryConfigOpen: false,
+    memoryLayoutPending: true,
     noteId: null,
     memoryEditor: null,
     chatsCollapsed: LS.get('oc-clone-chats-collapsed', false) === true,
@@ -484,8 +593,208 @@
   };
   const toolOutputLines = (text) => String(text || '').replace(/\r\n/g, '\n').split('\n').slice(0, 200);
 
-  const NOTE_ACCENTS = { note: '#8b7cff', memory: '#65d7c1', mcp: '#58b6ff', skill: '#f0ad67', decision: '#f0ad67', pattern: '#e785b9', tool_sequence: '#92d36e' };
+  const NOTE_ACCENTS = { note: '#8b7cff', memory: '#65d7c1', mcp: '#4ade80', skill: '#63b3ff', decision: '#f0ad67', pattern: '#e785b9', tool_sequence: '#92d36e' };
   const NOTE_KINDS = { note: 'Note', memory: 'Memory', mcp: 'MCP', skill: 'Skill', decision: 'Decision', pattern: 'Pattern', tool_sequence: 'Pattern', auto: 'Memory' };
+  const KIND_FROM_TAG = Object.fromEntries(Object.entries(NOTE_KINDS).map(([kind, tag]) => [tag, kind]));
+  /* Cor do nó: MCP = verde claro, Skill = azul claro (configuráveis); demais tipos
+   * usam o acento padrão ou o cor persistida na nota. */
+  const noteAccent = (note) => {
+    const kind = note.kind || KIND_FROM_TAG[note.tag] || '';
+    if (kind === 'mcp') return state.memoryConfig.mcp || '#4ade80';
+    if (kind === 'skill') return state.memoryConfig.skill || '#63b3ff';
+    return NOTE_ACCENTS[kind] || note.accent || '#8b7cff';
+  };
+  const prettyJson = (text) => {
+    try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return String(text || ''); }
+  };
+  const memoryKindLabel = (kind) => (kind === 'mcp' ? 'MCP / JSON' : kind === 'skill' ? 'Skill / Markdown' : kind === 'memory' ? 'Memory / Markdown' : NOTE_KINDS[kind] ? `${NOTE_KINDS[kind]} / Markdown` : 'Markdown');
+  const memoryTemplateFor = (kind) => {
+    if (kind === 'mcp') return JSON.stringify({ name: 'novo-mcp', transport: 'stdio', command: 'node server.js', tools: [] }, null, 2);
+    if (kind === 'skill') return '# Nome da skill\n\n## Quando usar\n- \n\n## Como usar\n1. ';
+    if (kind === 'memory') return '# Memória\n\nRegistre aqui o contexto duradouro.';
+    return '# Untitled note\n\nStart writing here.';
+  };
+  const memoryTitleFor = (kind) => ({ mcp: 'Novo MCP', skill: 'Nova skill', memory: 'Nova memória' }[kind] || 'Untitled note');
+  const mulberry32 = (seed) => () => {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  /* Layout "rede neural" estilo referência: árvore radial. O hub (nó mais
+   * conectado) fica no centro, filhos espalham em anéis por profundidade,
+   * dentro do arco angular do pai; componentes isolados ganham setores
+   * próprios. Nós fixados (arrastados) preservam a posição. Coordenadas %. */
+  const layoutMemoryGraph = (notes, edges, spacing = 1) => {
+    const n = notes.length;
+    if (!n) return;
+    const index = new Map(notes.map((note, i) => [note.id, i]));
+    const adj = Array.from({ length: n }, () => []);
+    edges.forEach(([a, b]) => {
+      const ia = index.get(a), ib = index.get(b);
+      if (ia === undefined || ib === undefined || ia === ib) return;
+      adj[ia].push(ib); adj[ib].push(ia);
+    });
+    const W = 1600, H = 900, CX = W / 2, CY = H / 2, R_MAX = Math.min(W, H) / 2 - 64;
+    const random = mulberry32(0x5e00 + n * 7);
+    /* Componentes conexos (BFS) */
+    const visited = new Array(n).fill(false);
+    const parent = new Array(n).fill(-1);
+    const depth = new Array(n).fill(0);
+    const components = [];
+    for (let seed = 0; seed < n; seed++) {
+      if (visited[seed]) continue;
+      const comp = { nodes: [seed], root: seed };
+      visited[seed] = true;
+      let frontier = [seed];
+      while (frontier.length) {
+        const next = [];
+        for (const v of frontier) for (const w of adj[v]) if (!visited[w]) {
+          visited[w] = true; parent[w] = v; depth[w] = depth[v] + 1;
+          comp.nodes.push(w); next.push(w);
+        }
+        frontier = next;
+      }
+      components.push(comp);
+    }
+    components.sort((a, b) => b.nodes.length - a.nodes.length);
+    /* Raio por anel: profundidade efetiva limitada (cadeias longas dobram
+     * para dentro dos anéis visuais) + fit de arco por contagem. */
+    const DMAX = Math.max(4, Math.min(7, Math.ceil(Math.sqrt(n) * 1.1)));
+    const dEffOf = (d) => Math.min(d, DMAX);
+    const depthCount = new Array(DMAX + 1).fill(0);
+    depth.forEach((d) => { depthCount[dEffOf(d)] += 1; });
+    const ringRadius = [0];
+    for (let d = 1; d <= DMAX; d++) {
+      const fit = (depthCount[d] * 46) / (2 * Math.PI);
+      ringRadius[d] = Math.max(fit, R_MAX * 0.94 * Math.pow(d / DMAX, 0.75), ringRadius[d - 1] + 26);
+    }
+    if (ringRadius[DMAX] > R_MAX * 0.98) {
+      const kScale = (R_MAX * 0.94) / ringRadius[DMAX];
+      for (let d = 1; d <= DMAX; d++) ringRadius[d] *= kScale;
+    }
+    const angleOf = new Array(n).fill(0), radiusOf = new Array(n).fill(0);
+    /* Folhas por subárvore distribuem os arcos */
+    const leafOf = (v) => {
+      const kids = adj[v].filter((w) => parent[w] === v);
+      const value = kids.length ? kids.reduce((sum, w) => sum + leafOf(w), 0) : 1;
+      return value;
+    };
+    const assignTree = (root, a0, a1, rStart) => {
+      const kids = adj[root].filter((w) => parent[w] === root);
+      if (!kids.length) return;
+      const total = kids.reduce((sum, w) => sum + leafOf(w), 0);
+      const rNext = Math.min(R_MAX, ringRadius[dEffOf(depth[kids[0]])]);
+      let cursor = a0;
+      kids.forEach((w) => {
+        const span = (a1 - a0) * (leafOf(w) / (total || 1));
+        angleOf[w] = cursor + span / 2;
+        radiusOf[w] = rNext;
+        assignTree(w, cursor, cursor + span, rNext);
+        cursor += span;
+      });
+    };
+    /* Orçamento angular por componente, ponderado por sqrt(tamanho) */
+    const weights = components.map((comp) => Math.sqrt(comp.nodes.length));
+    const weightTotal = weights.reduce((a, b) => a + b, 0) || 1;
+    let sectorStart = random() * Math.PI * 2;
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    let looseIndex = 0;
+    components.forEach((comp, ci) => {
+      const span = (Math.PI * 2) * (weights[ci] / weightTotal);
+      const hub = comp.root;
+      const compDepth = Math.max(...comp.nodes.map((v) => dEffOf(depth[v])));
+      if (ci === 0) {
+        angleOf[hub] = sectorStart + span / 2; radiusOf[hub] = 0;
+      } else {
+        /* Componentes satélites: hub num anel interno, filhos irradiam */
+        angleOf[hub] = sectorStart + span / 2;
+        radiusOf[hub] = compDepth > 0 ? ringRadius[Math.min(1, DMAX)] : 0;
+      }
+      if (compDepth > 0) assignTree(hub, sectorStart, sectorStart + span, radiusOf[hub]);
+      /* Nós sem aresta (avulsos, inclusive componentes de tamanho 1):
+       * anel externo com espaçamento áureo */
+      const isSolo = comp.nodes.length === 1;
+      comp.nodes.forEach((v) => {
+        if (!isSolo && (v === hub || parent[v] >= 0)) return;
+        angleOf[v] = golden * (looseIndex++ + random() * 0.4);
+        radiusOf[v] = R_MAX * (0.8 + random() * 0.15);
+      });
+      sectorStart += span;
+    });
+    notes.forEach((note, i) => {
+      if (note.pinned && typeof note.x === 'number' && typeof note.y === 'number') return;
+      note.x = Math.max(6, Math.min(94, (CX + Math.cos(angleOf[i]) * radiusOf[i]) / 16));
+      note.y = Math.max(9, Math.min(91, (CY + Math.sin(angleOf[i]) * radiusOf[i]) / 9));
+    });
+    /* Relaxamento tangencial: o raio de cada nó vem da árvore radial (nuvem
+     * redonda garantida); as forças só ajustam o ângulo para destancar. */
+    const K = 120 * spacing;
+    const isFixed = notes.map((note) => !!note.pinned);
+    const posAngle = angleOf.slice();
+    const posRadius = radiusOf.slice();
+    for (let step = 0; step < 46; step++) {
+      const temp = 0.12 * (1 - step / 46) + 0.01;
+      const tang = new Array(n).fill(0);
+      for (let i = 0; i < n; i++) {
+        const r = posRadius[i];
+        if (r <= 1 || isFixed[i]) continue;
+        const cx = CX + Math.cos(posAngle[i]) * r;
+        const cy = CY + Math.sin(posAngle[i]) * r;
+        let fx = 0, fy = 0;
+        for (let j = 0; j < n; j++) {
+          if (j === i) continue;
+          const rj = posRadius[j];
+          const jx = CX + Math.cos(posAngle[j]) * rj;
+          const jy = CY + Math.sin(posAngle[j]) * rj;
+          let ddx = jx - cx, ddy = jy - cy;
+          let d2 = ddx * ddx + ddy * ddy;
+          if (d2 < 150) { ddx = random() - 0.5; ddy = random() - 0.5; d2 = 150; }
+          const d = Math.sqrt(d2);
+          /* repulsão (afasta de j) */
+          fx -= ((K * K) / d) * (ddx / d);
+          fy -= ((K * K) / d) * (ddy / d);
+        }
+        edges.forEach(([a, b]) => {
+          const ia = index.get(a), ib = index.get(b);
+          if (ia === undefined || ib === undefined || ia === ib) return;
+          const me = index.get(notes[i].id);
+          const other = ia === me ? ib : (ib === me ? ia : -1);
+          if (other < 0 || isFixed[other]) return;
+          const ox = CX + Math.cos(posAngle[other]) * posRadius[other];
+          const oy = CY + Math.sin(posAngle[other]) * posRadius[other];
+          const dx = ox - cx, dy = oy - cy;
+          const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+          const f = (d - K * 0.95) * 0.5;
+          fx += (dx / d) * f;
+          fy += (dy / d) * f;
+        });
+        /* componente tangencial (ux,uy aponta para fora) */
+        const ux = (cx - CX) / r, uy = (cy - CY) / r;
+        tang[i] = fx * -uy + fy * ux;
+      }
+      for (let i = 0; i < n; i++) {
+        if (isFixed[i] || posRadius[i] <= 1) continue;
+        posAngle[i] += Math.max(-temp, Math.min(temp, tang[i] * 0.0005));
+      }
+    }
+    notes.forEach((note, i) => {
+      if (isFixed[i]) return;
+      const jitter = 1 + (random() - 0.5) * 0.09;
+      const r = posRadius[i] > 1 ? posRadius[i] * jitter : posRadius[i];
+      note.x = Math.max(6, Math.min(94, (CX + Math.cos(posAngle[i]) * r) / 16));
+      note.y = Math.max(9, Math.min(91, (CY + Math.sin(posAngle[i]) * r) / 9));
+    });
+    LS.set('oc-clone-memory-notes', state.memoryNotes);
+  };
+  const graphDegrees = (notes, edges) => {
+    const map = new Map();
+    edges.forEach(([a, b]) => {
+      if (a === b) return;
+      map.set(a, (map.get(a) || 0) + 1); map.set(b, (map.get(b) || 0) + 1);
+    });
+    return map;
+  };
   const relTimeFromMs = (ms) => {
     if (!ms) return 'agora';
     return relTime({ updatedAt: new Date(ms).toISOString() }) || 'agora';
@@ -503,6 +812,7 @@
   const mapBackendNote = (note, source = 'ZenoC') => ({
     id: String(note.id || 'mem_' + uid()),
     title: String(note.title || 'Nota'),
+    kind: NOTE_KINDS[note.kind] ? note.kind : (note.kind || 'memory'),
     tag: NOTE_KINDS[note.kind] || (note.kind ? String(note.kind) : 'Memory'),
     excerpt: String(note.content || '').replace(/[`*_#>\n]/g, ' ').trim().slice(0, 116),
     content: String(note.content || ''),
@@ -520,7 +830,7 @@
     notes.forEach((raw) => {
       const mapped = mapBackendNote(raw, source);
       const found = known.get(mapped.id);
-      if (found) { Object.assign(found, mapped, { x: found.x, y: found.y }); }
+      if (found) { Object.assign(found, mapped, { x: found.x, y: found.y, pinned: found.pinned }); }
       else { const pos = notePositionFor(mapped.id); state.memoryNotes.push({ ...mapped, x: pos.x, y: pos.y }); known.set(mapped.id, true); added++; }
     });
     if (added) LS.set('oc-clone-memory-notes', state.memoryNotes);
@@ -571,6 +881,7 @@
         })), 'Skills');
       }
       changed += mergeBackendLinks(links);
+      if (changed) state.memoryLayoutPending = true;
       if (changed && state.workspace === 'memory') render();
     } catch {}
   };
@@ -1187,16 +1498,27 @@
 
   const memoryNoteById = (id) => state.memoryNotes.find((note) => note.id === id);
 
-  const tplMemoryNode = (note) => {
-    const x = note.x * 16, y = note.y * 9, size = note.root ? 26 : 18;
-    return `<g data-memory-note="${esc(note.id)}" class="memory-node ${note.root ? 'memory-node-root' : ''}" transform="translate(${x} ${y})" tabindex="0" role="button" aria-label="Open ${esc(note.title)}">
-      <circle cx="0" cy="0" r="${size / 2}" class="memory-node-shape"></circle>
-      <text y="${size / 2 + 20}" text-anchor="middle" class="memory-node-label">${esc(note.title)}</text>
-      <g class="memory-node-actions" transform="translate(-54 ${-size / 2 - 32})">
-        <rect width="108" height="32" rx="7" class="memory-node-actions-bg"></rect>
-        <g data-memory-action="edit" transform="translate(18 16)"><rect x="-12" y="-12" width="24" height="24" fill="transparent"></rect><use href="#oc-edit" x="-7" y="-7" width="14" height="14"></use><title>Edit</title></g>
-        <g data-memory-action="view" transform="translate(54 16)"><rect x="-12" y="-12" width="24" height="24" fill="transparent"></rect><use href="#oc-eye" x="-7" y="-7" width="14" height="14"></use><title>View</title></g>
-        <g data-memory-action="delete" transform="translate(90 16)"><rect x="-12" y="-12" width="24" height="24" fill="transparent"></rect><use href="#oc-delete-bin" x="-7" y="-7" width="14" height="14"></use><title>Delete</title></g>
+  /* Nó da rede: bolinha com halo colorido por tipo (MCP verde, Skill azul).
+   * O nome NÃO é renderizado por padrão — só dentro do painelzinho de ações
+   * (ou globalmente se "Mostrar nomes" estiver ativo na configuração). */
+  const tplMemoryNode = (note, degree = 0) => {
+    const x = Math.round(note.x * 16), y = Math.round(note.y * 9);
+    const r = Math.round((note.root ? 9 : 5.5) + Math.min(9, degree * 1.8));
+    const accent = noteAccent(note);
+    const showLabel = !!state.memoryConfig.labels;
+    const title = note.title.length > 24 ? `${note.title.slice(0, 23)}…` : note.title;
+    const panelW = Math.round(Math.max(116, Math.min(236, 34 + title.length * 6.6)));
+    const cx = panelW / 2;
+    return `<g data-memory-note="${esc(note.id)}" class="memory-node ${note.root ? 'memory-node-root' : ''}" style="--memory-node-accent:${accent}" transform="translate(${x} ${y})" tabindex="0" role="button" aria-label="Open ${esc(note.title)}">
+      <circle class="memory-node-halo" r="${r + 8}"></circle>
+      <circle cx="0" cy="0" r="${r}" class="memory-node-shape"></circle>
+      ${state.memoryConfig.labels ? `<text y="${r + 16}" text-anchor="middle" class="memory-node-label">${esc(title)}</text>` : ''}
+      <g class="memory-node-actions" transform="translate(${-cx} ${-r - 62})">
+        <text x="${cx}" y="12" text-anchor="middle" class="memory-node-title">${esc(title)}</text>
+        <rect width="${panelW}" height="30" y="18" rx="7" class="memory-node-actions-bg"></rect>
+        <g data-memory-action="edit" transform="translate(${cx - 30} 33)"><rect x="-12" y="-12" width="24" height="24" fill="transparent"></rect><use href="#oc-edit" x="-7" y="-7" width="14" height="14"></use><title>Edit</title></g>
+        <g data-memory-action="view" transform="translate(${cx} 33)"><rect x="-12" y="-12" width="24" height="24" fill="transparent"></rect><use href="#oc-eye" x="-7" y="-7" width="14" height="14"></use><title>View</title></g>
+        <g data-memory-action="delete" transform="translate(${cx + 30} 33)"><rect x="-12" y="-12" width="24" height="24" fill="transparent"></rect><use href="#oc-delete-bin" x="-7" y="-7" width="14" height="14"></use><title>Delete</title></g>
       </g>
     </g>`;
   };
@@ -1205,25 +1527,32 @@
     const note = memoryNoteById(state.noteId);
     if (!note) return '';
     const editing = state.memoryEditor?.id === note.id;
+    const kind = state.memoryEditor?.kind || note.kind || KIND_FROM_TAG[note.tag] || 'note';
     return `<div class="memory-note-layer" data-note-layer>
       <div class="memory-note-backdrop" data-note-backdrop></div>
       <article role="dialog" aria-modal="true" aria-label="${esc(note.title)}" class="memory-note-dialog oc-dialog">
         <header class="memory-note-header">
           <div class="min-w-0">
-            <div class="memory-note-kicker"><span class="memory-node-dot" style="--memory-node-accent: ${note.accent}"></span>${esc(note.tag)} <span>/</span> Markdown note</div>
+            <div class="memory-note-kicker"><span class="memory-node-dot" style="--memory-node-accent: ${noteAccent(note)}"></span>${esc(note.tag)} <span>/</span> ${esc(memoryKindLabel(kind))}</div>
             ${editing ? `<input data-memory-title class="memory-editor-title" value="${esc(state.memoryEditor.title)}" aria-label="Note title">` : `<h2>${esc(note.title)}</h2>`}
           </div>
           <div class="memory-note-actions">
-            ${editing ? `<button type="button" data-action="save-memory-note" class="memory-editor-save">Save</button><button type="button" data-action="discard-memory-note" class="memory-editor-discard">Discard</button>` : `<button type="button" data-action="edit-memory-note" class="memory-icon-button" title="Edit note" aria-label="Edit note">${icon('oc-edit', 'remixicon h-4 w-4')}</button>`}
+            ${editing ? `<select data-memory-kind class="memory-editor-kind" aria-label="Tipo da memória">${['note', 'memory', 'mcp', 'skill'].map((k) => `<option value="${k}" ${kind === k ? 'selected' : ''}>${NOTE_KINDS[k]}${k === 'mcp' ? ' (JSON)' : k === 'skill' ? ' (MD)' : ''}</option>`).join('')}</select><button type="button" data-action="save-memory-note" class="memory-editor-save">Save</button><button type="button" data-action="discard-memory-note" class="memory-editor-discard">Discard</button>` : `<button type="button" data-action="edit-memory-note" class="memory-icon-button" title="Edit note" aria-label="Edit note">${icon('oc-edit', 'remixicon h-4 w-4')}</button>`}
             <button type="button" data-action="close-note" class="memory-icon-button" title="Close note" aria-label="Close note">${icon('oc-close', 'remixicon h-4 w-4')}</button>
           </div>
         </header>
         <div class="memory-note-scroll">
-          <div class="memory-note-content">${editing ? `<textarea data-memory-content class="memory-editor-content" aria-label="Note content">${esc(state.memoryEditor.content)}</textarea>` : renderMarkdown(note.content)}</div>
+          <div class="memory-note-content">${editing ? `<textarea data-memory-content class="memory-editor-content ${kind === 'mcp' ? 'is-json' : ''}" aria-label="Note content" spellcheck="false">${esc(state.memoryEditor.content)}</textarea>` : kind === 'mcp' ? `<pre class="memory-json-view">${esc(prettyJson(note.content))}</pre>` : renderMarkdown(note.content)}</div>
           <footer class="memory-note-footer"><span>Captured by ${esc(note.by || 'Zeno Agent')}</span><span>${esc(note.updated)}</span></footer>
         </div>
       </article>
     </div>`;
+  };
+
+  const memoryContentForEditor = (kind, content) => {
+    if (kind !== 'mcp') return content;
+    const parsed = (() => { try { return JSON.parse(content); } catch { return null; } })();
+    return parsed ? JSON.stringify(parsed, null, 2) : content;
   };
 
   const tplMemoryDeleteModal = () => {
@@ -1244,6 +1573,12 @@
 
   const tplMemoryWorkspace = () => {
     const notes = Array.isArray(state.memoryNotes) ? state.memoryNotes : MEMORY_NOTES;
+    const cfg = state.memoryConfig;
+    if (state.memoryLayoutPending) {
+      layoutMemoryGraph(notes, state.memoryEdges, Number(cfg.spacing) || 1);
+      state.memoryLayoutPending = false;
+    }
+    const degrees = graphDegrees(notes, state.memoryEdges);
     const positions = new Map(notes.map((note) => [note.id, note]));
     const edges = state.memoryEdges.map(([from, to], index) => {
       const a = positions.get(from), b = positions.get(to);
@@ -1251,13 +1586,27 @@
       const ax = a.x * 16, ay = a.y * 9, bx = b.x * 16, by = b.y * 9;
       return `<line data-memory-edge data-from="${esc(from)}" data-to="${esc(to)}" x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" class="memory-edge" style="--memory-edge-delay: ${index * 35}ms"></line>`;
     }).join('');
+    const configPopover = `<div class="memory-config-wrap">
+      <button type="button" data-action="memory-config" class="zeno-mini-btn" title="Configurar a rede">${icon('oc-settings-3', 'remixicon h-3 w-3')}Config</button>
+      ${state.memoryConfigOpen ? `
+      <div class="memory-config-popover" data-memory-config>
+        <div class="memory-config-row"><span class="memory-config-dot" style="--memory-node-accent:${cfg.mcp}"></span>MCP <input type="color" data-memory-config-color="mcp" value="${esc(cfg.mcp)}"></div>
+        <div class="memory-config-row"><span class="memory-config-dot" style="--memory-node-accent:${cfg.skill}"></span>Skill <input type="color" data-memory-config-color="skill" value="${esc(cfg.skill)}"></div>
+        <div class="memory-config-row">Espaçamento <input type="range" min="0.7" max="1.9" step="0.1" data-memory-config-range="spacing" value="${esc(String(cfg.spacing))}"></div>
+        <div class="memory-config-row"><label class="memory-config-check"><input type="checkbox" data-memory-config-check="labels" ${cfg.labels ? 'checked' : ''}> Mostrar nomes nos nós</label></div>
+        <div class="memory-config-hint">MCP é formatado em JSON · Skill em Markdown · clique no nó para ver o nome</div>
+        <button type="button" data-action="memory-relayout" class="zeno-mini-btn">Reorganizar rede</button>
+      </div>` : ''}
+    </div>`;
     return `<div class="memory-view" data-memory-view>
       <header class="memory-overlay-heading"><h1>Zeno Agent Memory</h1><p>Your knowledge, notes and skills connected in one living graph.</p></header>
       <div class="memory-backend-bar">
         <span class="zeno-status-dot ${state.backendOk ? 'is-on' : ''}"></span>
         <span>${state.backendOk ? 'ZenoC conectado' : 'Modo local'}</span>
         <span class="memory-backend-count">${notes.length} nota${notes.length === 1 ? '' : 's'} · ${state.memoryEdges.length} link${state.memoryEdges.length === 1 ? '' : 's'}${state.backendSkills && state.backendSkills.length ? ` · ${state.backendSkills.length} skill${state.backendSkills.length === 1 ? '' : 's'}` : ''}</span>
+        <span class="memory-legend"><span class="memory-legend-item"><span class="memory-config-dot" style="--memory-node-accent:${cfg.mcp}"></span>MCP</span><span class="memory-legend-item"><span class="memory-config-dot" style="--memory-node-accent:${cfg.skill}"></span>Skill</span></span>
         <span class="flex-1"></span>
+        ${configPopover}
         <button type="button" data-action="memory-refresh" class="zeno-mini-btn" title="Sincronizar com o agente">${icon('oc-refresh', 'remixicon h-3 w-3')}Atualizar</button>
         <button type="button" data-action="memory-new" class="zeno-mini-btn" title="Criar nota">${icon('oc-add', 'remixicon h-3 w-3')}Nova nota</button>
       </div>
@@ -1266,9 +1615,9 @@
           <defs><pattern id="memory-grid" width="30" height="30" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" class="memory-grid-dot"></circle></pattern></defs>
           <rect width="1600" height="900" fill="url(#memory-grid)" class="memory-grid-surface" aria-hidden="true"></rect>
           <g data-memory-edges>${edges}</g>
-          <g data-memory-nodes>${notes.map(tplMemoryNode).join('')}</g>
+          <g data-memory-nodes>${notes.map((note) => tplMemoryNode(note, degrees.get(note.id) || 0)).join('')}</g>
         </svg>
-        <div class="memory-map-help">Drag to move · Scroll to zoom · Double-click a node to open</div>
+        <div class="memory-map-help">Arraste para mover · Scroll para zoom · Duplo clique abre · Botão direito cria · Direito no nó liga</div>
       </div>
       ${tplMemoryNoteModal()}
       ${tplMemoryDeleteModal()}
@@ -1506,8 +1855,7 @@
   /* ---------- templates: settings ---------- */
   const SETTINGS_GROUPS = [
     ['General', [
-      ['Appearance', 'oc-palette'], ['Chat', 'oc-chat-ai-3'], ['Models', 'oc-robot'],
-      ['Notifications', 'oc-notification-3'],
+      ['Chat', 'oc-chat-ai-3'], ['Models', 'oc-robot'], ['Notifications', 'oc-notification-3'],
       ['Shortcuts', 'oc-command'], ['Voice', 'oc-mic'], ['Usage', 'oc-bar-chart-2'],
     ]],
     ['Workspace', [
@@ -1515,13 +1863,14 @@
     ]],
   ];
 
-  const tplSettingsRadio = (group, value, options) => `
-    <div role="radiogroup" aria-label="${group}" class="space-y-1.5">
-      ${options.map((o) => `
-      <div class="flex cursor-pointer gap-2 py-0.5 items-center" role="button" tabindex="0" data-radio="${o}">
-        <button type="button" role="radio" aria-checked="${value === o}" aria-label="${o}" class="group/radio relative flex h-[14px] w-[14px] min-h-[14px] min-w-[14px] shrink-0 self-center items-center justify-center rounded-full outline-none transition-[background-color,box-shadow] duration-200 ease-out ${value === o ? 'bg-[color-mix(in_srgb,var(--primary-base)_80%,transparent)] shadow-none' : 'bg-[var(--surface-muted)] shadow-[inset_0_0_0_1px_var(--interactive-border)]'}"><span aria-hidden="true" class="block h-[5px] w-[5px] rounded-full ${value === o ? 'bg-white' : 'bg-white opacity-0'}"></span></button>
-        <div class="flex min-w-0 flex-col"><span class="typography-settings-field-label font-normal text-foreground">${o}</span></div>
-      </div>`).join('')}
+  /* Seletor segmentado com ✓ no item escolhido (ex.: color mode, tipo de gráfico). */
+  const tplSegGroup = (label, attr, value, options) => `
+    <div role="radiogroup" aria-label="${label}" class="zeno-seg-group">
+      ${options.map(([val, text, ic]) => `
+      <button type="button" role="radio" aria-checked="${value === val}" ${attr}="${val}" class="zeno-seg ${value === val ? 'is-on' : ''}" title="${esc(text)}">
+        ${value === val ? icon(ic || 'oc-check', 'remixicon h-3.5 w-3.5') : ''}
+        <span>${esc(text)}</span>
+      </button>`).join('')}
     </div>`;
 
   const tplSettingsSelect = (label, value, options, dataMenu) => `
@@ -1555,99 +1904,43 @@
 
   const tplSettingsSection = () => {
     const sec = state.settingsSection;
-    if (sec === 'Appearance') {
-      const isDark = state.colorMode === 'dark' || (state.colorMode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    if (sec === 'Chat') {
+      const c = state.settingsChat;
       const lightSel = themeList('light').find((t) => t.id === state.lightTheme) || { name: 'OpenChamber Mono' };
       const darkSel = themeList('dark').find((t) => t.id === state.darkTheme) || { name: 'OpenChamber Mono' };
       return `
       <div class="px-6 py-5">
-        <h2 class="typography-h3 text-foreground">Appearance</h2>
-        <p class="typography-meta mt-1 text-muted-foreground">Customize how OpenChamber looks and feels.</p>
-        <div class="mt-6">
-          <h3 class="typography-ui-label font-semibold text-foreground">Color mode &amp; Theme</h3>
-          <div class="mt-3 grid grid-cols-1 gap-6 @3xl:grid-cols-2 @3xl:gap-10">
-            <div class="space-y-4">
-              ${tplSettingsRadio('Color Mode', state.colorMode === 'system' ? 'System' : state.colorMode, ['System', 'Light', 'Dark'])}
-              <div>
-                <div class="mb-1.5 typography-meta font-medium text-muted-foreground">Light Theme</div>
-                ${tplSettingsSelect('Select light theme', lightSel.name, themeList('light'), 'light-theme')}
-              </div>
-              <div>
-                <div class="mb-1.5 typography-meta font-medium text-muted-foreground">Dark Theme</div>
-                ${tplSettingsSelect('Select dark theme', darkSel.name, themeList('dark'), 'dark-theme')}
-              </div>
-              <button type="button" class="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground transition-colors" data-action="reload-themes">${icon('oc-refresh', 'remixicon h-3.5 w-3.5')}Reload themes</button>
-            </div>
-            <div class="space-y-4">
-              <div>
-                <div class="mb-1.5 typography-meta font-medium text-muted-foreground">Current theme</div>
-                <div class="flex items-center gap-2 rounded-lg border border-border/70 bg-[var(--surface-elevated)] p-3">
-                  <div class="flex h-8 w-8 items-center justify-center rounded-md" style="background: var(--primary); color: var(--primary-foreground);">${icon('oc-palette', 'remixicon h-4 w-4')}</div>
-                  <div>
-                    <div class="text-sm font-medium text-foreground">${isDark ? darkSel.name : lightSel.name}</div>
-                    <div class="text-xs text-muted-foreground">${isDark ? 'Dark' : 'Light'} variant</div>
-                  </div>
-                </div>
-              </div>
-              <div>
-                <div class="mb-1.5 typography-meta font-medium text-muted-foreground">Localization</div>
-                <div class="space-y-3">
-                  <div>
-                    <div class="mb-1.5 typography-meta text-muted-foreground">Language</div>
-                    ${tplSettingsSelect('Select language', state.appLang === 'pt' ? 'Português' : state.appLang === 'es' ? 'Español' : 'English', [], 'lang')}
-                  </div>
-                  <div>
-                    <div class="mb-1.5 typography-meta text-muted-foreground">Time Format</div>
-                    ${tplSettingsSelect('Select time format', state.timeFormat === '12h' ? '12h' : state.timeFormat === '24h' ? '24h' : 'Auto', [], 'timefmt')}
-                  </div>
-                </div>
-              </div>
-              <div>
-                <div class="mb-1.5 typography-meta font-medium text-muted-foreground">App</div>
-                <div class="space-y-3">
-                  <div>
-                    <div class="mb-1.5 typography-meta text-muted-foreground">Install App Name</div>
-                    <input value="OpenChamber" class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">
-                  </div>
-                  <div>
-                    <div class="mb-1.5 typography-meta text-muted-foreground">Install Orientation</div>
-                    ${tplSettingsSelect('Select orientation', state.installOrientation === 'portrait' ? 'Portrait' : state.installOrientation === 'landscape' ? 'Landscape' : 'Follow system', [], 'orientation')}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    }
-    if (sec === 'General') {
-      return `
-      <div class="px-6 py-5">
-        <h2 class="typography-h3 text-foreground">General</h2>
-        <p class="typography-meta mt-1 text-muted-foreground">General settings for OpenChamber.</p>
-        <div class="mt-6 space-y-4">
-          <div>
-            <div class="mb-1.5 typography-meta font-medium text-muted-foreground">Application name</div>
-            <input value="OpenChamber" class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">
-          </div>
-          <div>
-            <div class="mb-1.5 typography-meta font-medium text-muted-foreground">Startup</div>
-            ${tplSettingsSelect('Select startup behavior', 'Continue last session', [], 'startup')}
-          </div>
-        </div>
-      </div>`;
-    }
-    if (sec === 'Chat') {
-      const c = state.settingsChat;
-      return `
-      <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Chat</h2>
-        <p class="typography-meta mt-1 text-muted-foreground">Comportamento do composer e das mensagens.</p>
-        <div class="mt-6 max-w-[28rem] space-y-4">
-          ${tplSettingsField('Font size', tplNativeSelect('data-set-field="chat.fontSize"', c.fontSize, [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']]))}
-          ${tplSettingsField('Enter behavior', tplNativeSelect('data-set-field="chat.enterBehavior"', c.enterBehavior, [['send', 'Enter envia · Shift+Enter quebra linha'], ['newline', 'Enter quebra linha · Ctrl+Enter envia']]))}
-          ${tplToggleRow('Follow-up suggestions', 'Mostra a pílula de sugestão abaixo do composer.', c.showSuggestions, 'data-set-toggle="chat.showSuggestions"')}
-          ${tplToggleRow('Compact mode', 'Mensagens mais densas, menos respiro.', c.compactMode, 'data-set-toggle="chat.compactMode"')}
+        <p class="typography-meta mt-1 text-muted-foreground">Tema, idioma e comportamento do composer e das mensagens.</p>
+
+        <div class="mt-8">
+          <h3 class="typography-ui-label font-semibold text-foreground">Aparência</h3>
+          <div class="mt-4 space-y-5">
+            ${tplSettingsField('Modo de cor', tplSegGroup('Color Mode', 'data-color-mode', state.colorMode, [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']]))}
+            <div class="grid max-w-[34rem] grid-cols-1 gap-4 @3xl:grid-cols-2">
+              ${tplSettingsField('Tema claro', tplSettingsSelect('Select light theme', lightSel.name, themeList('light'), 'light-theme'))}
+              ${tplSettingsField('Tema escuro', tplSettingsSelect('Select dark theme', darkSel.name, themeList('dark'), 'dark-theme'))}
+            </div>
+            <div class="grid max-w-[34rem] grid-cols-1 gap-4 @3xl:grid-cols-2">
+              ${tplSettingsField('Idioma', tplSettingsSelect('Select language', state.appLang === 'pt' ? 'Português' : state.appLang === 'es' ? 'Español' : 'English', [], 'lang'))}
+              ${tplSettingsField('Formato de hora', tplSettingsSelect('Select time format', state.timeFormat === '12h' ? '12h' : state.timeFormat === '24h' ? '24h' : 'Auto', [], 'timefmt'))}
+            </div>
+            <div class="grid max-w-[34rem] grid-cols-1 gap-4 @3xl:grid-cols-2">
+              ${tplSettingsField('Nome do app', tplSettingsInput('data-set-field="app.installName"', state.installAppName, 'text', 'OpenChamber'))}
+              ${tplSettingsField('Orientação de instalação', tplSettingsSelect('Select orientation', state.installOrientation === 'portrait' ? 'Portrait' : state.installOrientation === 'landscape' ? 'Landscape' : 'Follow system', [], 'orientation'))}
+            </div>
+            <button type="button" class="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground transition-colors" data-action="reload-themes">${icon('oc-refresh', 'remixicon h-3.5 w-3.5')}Recarregar temas</button>
+          </div>
+        </div>
+
+        <div class="mt-8">
+          <h3 class="typography-ui-label font-semibold text-foreground">Conversa</h3>
+          <div class="mt-4 max-w-[28rem] space-y-5">
+            ${tplSettingsField('Tamanho da fonte', tplNativeSelect('data-set-field="chat.fontSize"', c.fontSize, [['small', 'Pequena'], ['medium', 'Média'], ['large', 'Grande']]))}
+            ${tplSettingsField('Comportamento do Enter', tplNativeSelect('data-set-field="chat.enterBehavior"', c.enterBehavior, [['send', 'Enter envia · Shift+Enter quebra linha'], ['newline', 'Enter quebra linha · Ctrl+Enter envia']]))}
+            ${tplToggleRow('Sugestões de follow-up', 'Mostra a pílula de sugestão abaixo do composer.', c.showSuggestions, 'data-set-toggle="chat.showSuggestions"')}
+            ${tplToggleRow('Modo compacto', 'Mensagens mais densas, menos respiro.', c.compactMode, 'data-set-toggle="chat.compactMode"')}
+          </div>
         </div>
       </div>`;
     }
@@ -1657,7 +1950,7 @@
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Notifications</h2>
         <p class="typography-meta mt-1 text-muted-foreground">Quando o Zeno deve chamar sua atenção.</p>
-        <div class="mt-6 max-w-[28rem] space-y-2.5">
+        <div class="mt-9 max-w-[28rem] space-y-3.5">
           ${tplToggleRow('Enable notifications', 'Avisar quando uma resposta terminar.', n.enabled, 'data-set-toggle="notif.enabled"')}
           ${tplToggleRow('Sound', 'Tocar um som junto do aviso.', n.sound, 'data-set-toggle="notif.sound"')}
           ${tplToggleRow('Mentions only', 'Só avisar quando a resposta pedir sua ação.', n.mentionOnly, 'data-set-toggle="notif.mentionOnly"')}
@@ -1669,7 +1962,7 @@
     if (sec === 'Shortcuts') {
       const s = state.shortcuts;
       const row = (label, key) => `
-        <label class="flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2">
+        <label class="flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2.5">
           <span class="text-sm text-foreground">${esc(label)}</span>
           <input data-shortcut="${key}" value="${esc(s[key] || '')}" spellcheck="false" autocomplete="off"
             class="h-7 w-36 rounded-md border border-border bg-transparent px-2 text-right font-mono text-xs text-foreground outline-none">
@@ -1677,8 +1970,8 @@
       return `
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Shortcuts</h2>
-        <p class="typography-meta mt-1 text-muted-foreground">Clique num atalho e digite a nova combinação.</p>
-        <div class="mt-6 max-w-[28rem] space-y-2.5">
+        <p class="typography-meta mt-1 text-muted-foreground">Clique no campo e digite a nova combinação.</p>
+        <div class="mt-9 max-w-[28rem] space-y-3.5">
           ${row('New chat', 'newChat')}
           ${row('Command palette', 'palette')}
           ${row('Settings', 'settings')}
@@ -1688,45 +1981,35 @@
       </div>`;
     }
     if (sec === 'Voice') {
+      const isDeepgram = state.voiceProvider !== 'openai';
       return `
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Voice</h2>
         <p class="typography-meta mt-1 text-muted-foreground">Fala com o Zeno: Deepgram é o padrão, OpenAI é a opção.</p>
-        <div class="mt-6 max-w-[28rem] space-y-4">
+        <div class="mt-8 max-w-[28rem] space-y-5">
           ${tplSettingsField('Provider', tplNativeSelect('data-set-field="voice.provider"', state.voiceProvider, [['deepgram', 'Deepgram (padrão)'], ['openai', 'OpenAI']]))}
           ${tplSettingsField('Agent language', tplNativeSelect('data-set-field="voice.lang"', state.voiceLang, [['pt-BR', 'Português (BR)'], ['en-US', 'English (US)'], ['es-ES', 'Español']]))}
           ${tplSettingsField('Voice', tplNativeSelect('data-set-field="voice.name"', state.voiceName, [['aura-asteria-en', 'Aura Asteria (Deepgram)'], ['aura-luna-en', 'Aura Luna (Deepgram)'], ['aura-orion-en', 'Aura Orion (Deepgram)'], ['alloy', 'Alloy (OpenAI)'], ['echo', 'Echo (OpenAI)'], ['shimmer', 'Shimmer (OpenAI)']]))}
           ${tplSettingsField('Speech-to-text model', tplNativeSelect('data-set-field="voice.stt"', state.voiceSttModel, [['nova-3', 'nova-3 (Deepgram)'], ['nova-2', 'nova-2 (Deepgram)'], ['whisper-1', 'whisper-1 (OpenAI)']]))}
           ${tplSettingsField('Text-to-speech model', tplNativeSelect('data-set-field="voice.tts"', state.voiceTtsModel, [['aura-asteria-en', 'Aura (Deepgram)'], ['tts-1', 'tts-1 (OpenAI)'], ['tts-1-hd', 'tts-1-hd (OpenAI)']]))}
           ${tplToggleRow('Auto-speak', 'O agente começa a falar automaticamente ao entrar em voz.', state.voiceAutoSpeak !== false, 'data-set-toggle="voice.autoSpeak"')}
-          <div>
-            <div class="mb-1.5 typography-meta font-medium text-muted-foreground">OpenAI API key (opcional, só para provider OpenAI)</div>
-            <input data-set-field="voice.openaiKey" type="password" value="${esc(LS.get('oc-clone-voice-openai-key', ''))}" placeholder="sk-…" autocomplete="off"
-              class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">
-          </div>
+          ${isDeepgram ? tplSettingsField('Deepgram API key', `<input data-set-field="voice.deepgramKey" type="password" value="${esc(LS.get('oc-clone-voice-deepgram-key', ''))}" placeholder="cole sua Deepgram API key…" autocomplete="off"
+            class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">`) : ''}
+          ${!isDeepgram ? tplSettingsField('OpenAI API key (opcional, só para provider OpenAI)', `<input data-set-field="voice.openaiKey" type="password" value="${esc(LS.get('oc-clone-voice-openai-key', ''))}" placeholder="sk-…" autocomplete="off"
+            class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">`) : ''}
           <button type="button" data-action="voice-test" class="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground transition-colors">${icon('oc-mic', 'remixicon h-3.5 w-3.5')}Testar voz</button>
         </div>
       </div>`;
     }
     if (sec === 'Models') {
       const backend = state.backend || {};
-      const statusLine = state.backendOk
-        ? `ZenoC ${backend.version || ''} online${backend.adapter ? ` · ${backend.adapter}` : ''}`
-        : 'ZenoC offline (modo simulado)';
       const configuredModels = MODELS;
       return `
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Models</h2>
         <p class="typography-meta mt-1 text-muted-foreground">Conecte a API OpenAI-compatível usada pelo agente ZenoC. Os modelos ficam disponíveis aqui, no menu /model e no botão de anexos.</p>
-        <div class="mt-4 max-w-[30rem] rounded-lg border border-border/70 bg-[var(--surface-elevated)] p-3">
-          <div class="flex items-center gap-2 text-xs ${state.backendOk ? 'text-foreground' : 'text-muted-foreground'}">
-            <span class="zeno-status-dot ${state.backendOk ? 'is-on' : ''}"></span>
-            <strong>${esc(statusLine)}</strong>
-            ${backend.memory_notes !== undefined ? `<span class="text-muted-foreground">· ${backend.memory_notes} nota${backend.memory_notes === 1 ? '' : 's'} · ${backend.skills || 0} skill${backend.skills === 1 ? '' : 's'}</span>` : ''}
-          </div>
-          ${state.modelsError ? `<div class="zeno-models-note">${esc(state.modelsError)}</div>` : ''}
-        </div>
-        <div class="mt-6 grid max-w-[34rem] grid-cols-1 gap-4 @3xl:grid-cols-2">
+        ${state.modelsError ? `<div class="zeno-models-note mt-4">${esc(state.modelsError)}</div>` : ''}
+        <div class="mt-8 grid max-w-[34rem] grid-cols-1 gap-5 @3xl:grid-cols-2 @3xl:gap-x-10">
           ${tplSettingsField('Provider', tplSettingsInput('data-models-field="provider"', backend.provider || 'openai', 'text', 'openai'))}
           ${tplSettingsField('Base URL', tplSettingsInput('data-models-field="base_url"', backend.base_url || 'https://api.openai.com/v1', 'text', 'https://api.openai.com/v1'))}
           ${tplSettingsField('API key', tplSettingsInput('data-models-field="api_key"', '', 'password', backend.api_key === 'configured' ? 'já configurada — deixe vazio para manter' : 'sk-…'))}
@@ -1735,103 +2018,212 @@
           ${tplSettingsField('Workspace do agente', tplSettingsInput('data-models-field="workspace"', backend.workspace || '.', 'text', '.'))}
           ${tplSettingsField('Modo do agente', tplNativeSelect('data-models-field="agent_mode"', state.agentMode, [['full', 'Full (todas as ferramentas)'], ['minimal', 'Minimal (4 ferramentas)']]))}
         </div>
-        <div class="mt-4 flex flex-wrap items-center gap-2">
+        <div class="mt-5 flex flex-wrap items-center gap-2">
           <button type="button" data-action="models-save" class="zeno-mini-btn">Salvar configuração</button>
           <button type="button" data-action="models-refresh" class="zeno-mini-btn" ${state.modelsLoading ? 'disabled' : ''}>${state.modelsLoading ? 'Buscando…' : 'Buscar modelos da API'}</button>
+          <button type="button" data-action="models-test" class="zeno-mini-btn" ${state.modelsLoading ? 'disabled' : ''}>Testar conexão</button>
         </div>
-        <div class="mt-6">
+        <div class="mt-8">
           <h3 class="typography-ui-label font-semibold text-foreground">Modelos disponíveis (${configuredModels.length})</h3>
-          <div class="mt-2 flex max-w-[34rem] flex-wrap gap-1.5">
+          <div class="mt-3 flex max-w-[34rem] flex-wrap gap-1.5">
             ${configuredModels.map((name) => `<button type="button" data-action="models-pick" data-model="${esc(name)}" class="zeno-model-chip ${name === state.model ? 'is-on' : ''}">${name === state.model ? icon('oc-check', 'remixicon h-3 w-3') : ''}${esc(name)}</button>`).join('') || '<span class="text-xs text-muted-foreground">Nenhum modelo ainda. Informe a API key e clique em Buscar.</span>'}
           </div>
+        </div>
+      </div>`;
+    }
+    if (sec === 'Usage') {
+      const agg = usageAggregate();
+      const chart = state.usageChart || 'bars';
+      const t = agg.total;
+      const palette = ['#7c5cff', '#58b6ff', '#4ade80', '#fbbf24', '#f472b6', '#38bdf8', '#a78bfa', '#fb923c', '#34d399', '#f87171'];
+      const modelColor = (name) => {
+        const index = agg.models.findIndex((m) => m.model === name);
+        return palette[index >= 0 ? index % palette.length : 0];
+      };
+      const daily = usageDailySeries();
+      const maxDaily = Math.max(...daily.map((d) => d.cost), 1e-6);
+      const maxCost = Math.max(...agg.models.map((m) => m.cost), 1e-6);
+
+      const barsSvg = agg.models.length ? `
+        <svg viewBox="0 0 420 ${Math.max(agg.models.length * 34 + 8, 42)}" class="zeno-usage-svg" role="img" aria-label="Gasto por modelo">
+          ${agg.models.map((m, i) => {
+            const y = 10 + i * 34;
+            const w = Math.max(2, (m.cost / maxCost) * 240);
+            const color = modelColor(m.model);
+            return `
+            <text x="0" y="${y + 11}" class="zeno-usage-label">${esc(String(m.model).slice(0, 18))}</text>
+            <rect x="128" y="${y + 2}" width="240" height="14" rx="7" fill="rgb(255 255 255 / 0.06)"></rect>
+            <rect x="128" y="${y + 2}" width="${w.toFixed(1)}" height="14" rx="7" fill="${color}"></rect>
+            <text x="378" y="${y + 13}" class="zeno-usage-value">${fmtUSD(m.cost)}</text>`;
+          }).join('')}
+        </svg>` : '';
+
+      const donutSvg = agg.models.length ? (() => {
+        const radius = 52, circumference = 2 * Math.PI * radius;
+        let offset = 0;
+        const segs = agg.models.map((m) => {
+          const frac = m.cost / (t.cost || 1);
+          const seg = `<circle cx="70" cy="70" r="${radius}" fill="none" stroke="${modelColor(m.model)}" stroke-width="16" stroke-dasharray="${(frac * circumference).toFixed(2)} ${circumference.toFixed(2)}" stroke-dashoffset="${(-offset * circumference).toFixed(2)}" transform="rotate(-90 70 70)"></circle>`;
+          offset += frac;
+          return seg;
+        }).join('');
+        const legend = agg.models.map((m) => `
+          <div class="zeno-usage-legend-item">
+            <span class="zeno-usage-dot" style="background:${modelColor(m.model)}"></span>
+            <span class="min-w-0 flex-1 truncate" title="${esc(m.model)}">${esc(m.model)}</span>
+            <span class="zeno-usage-legend-num">${fmtUSD(m.cost)} · ${t.cost > 0 ? Math.round((m.cost / t.cost) * 100) : 0}%</span>
+          </div>`).join('');
+        return `
+        <div class="flex flex-wrap items-center gap-5">
+          <svg viewBox="0 0 140 140" class="zeno-usage-donut" role="img" aria-label="Distribuição por modelo">
+            <circle cx="70" cy="70" r="${radius}" fill="none" stroke="rgb(255 255 255 / 0.06)" stroke-width="16"></circle>
+            ${segs}
+            <text x="70" y="66" text-anchor="middle" class="zeno-usage-donut-total">${fmtUSD(t.cost)}</text>
+            <text x="70" y="82" text-anchor="middle" class="zeno-usage-donut-sub">total</text>
+          </svg>
+          <div class="flex min-w-[180px] flex-1 flex-col gap-1.5">${legend}</div>
+        </div>`;
+      })() : '';
+
+      const daysSvg = daily.length ? `
+        <svg viewBox="0 0 420 150" class="zeno-usage-svg" role="img" aria-label="Gasto por dia">
+          ${[0.25, 0.5, 0.75].map((f) => `<line x1="34" x2="412" y1="${18 + 100 * (1 - f)}" y2="${18 + 100 * (1 - f)}" stroke="rgb(255 255 255 / 0.07)"></line>`).join('')}
+          <polyline fill="none" stroke="#7c5cff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+            points="${daily.map((d, i) => `${34 + (i * 378) / Math.max(daily.length - 1, 1)},${(118 - (d.cost / maxDaily) * 100).toFixed(1)}`).join(' ')}"></polyline>
+          ${daily.map((d, i) => {
+            const x = 34 + (i * 378) / Math.max(daily.length - 1, 1);
+            const y = (118 - (d.cost / maxDaily) * 100).toFixed(1);
+            return `<circle cx="${x.toFixed(1)}" cy="${y}" r="${d.cost > 0 ? 3 : 1.5}" fill="#7c5cff"><title>${d.day}: ${fmtUSD(d.cost)}</title></circle>`;
+          }).join('')}
+          ${daily.map((d, i) => i % Math.ceil(daily.length / 7) === 0 ? `<text x="${(34 + (i * 378) / Math.max(daily.length - 1, 1)).toFixed(1)}" y="140" text-anchor="middle" class="zeno-usage-axis">${d.day}</text>` : '').join('')}
+        </svg>` : '';
+
+      const chartBody = chart === 'donut' ? donutSvg : chart === 'days' ? daysSvg : barsSvg;
+      const sessionsList = agg.sessions.length ? agg.sessions.map((s) => `
+        <button type="button" data-usage-session="${esc(s.id)}" class="zeno-usage-row" title="Abrir conversa">
+          <span class="min-w-0 flex-1 text-left">
+            <span class="zeno-usage-row-title">${esc(s.title)}</span>
+            <span class="zeno-usage-row-sub">${s.models.map((m) => esc(m)).join(' · ') || '—'}</span>
+          </span>
+          <span class="zeno-usage-row-nums">
+            <span class="zeno-usage-row-tokens">↑${fmtTokens(s.tokensIn)} ↓${fmtTokens(s.tokensOut)}</span>
+            <span class="zeno-usage-row-cost">${fmtUSD(s.cost)}</span>
+          </span>
+        </button>`).join('') : '<div class="zeno-usage-empty">Nenhum uso registrado ainda. Converse com o agente e os custos aparecem aqui.</div>';
+
+      return `
+      <div class="px-6 py-5">
+        <h2 class="typography-h3 text-foreground">Usage</h2>
+        <p class="typography-meta mt-1 text-muted-foreground">Gasto por conversa e por modelo. Custo estimado pela tabela de preço por 1M tokens.</p>
+        <div class="mt-6 grid max-w-[34rem] grid-cols-2 gap-3 @3xl:grid-cols-4">
+          <div class="zeno-usage-card"><span class="zeno-usage-card-num">${fmtUSD(t.cost)}</span><span class="zeno-usage-card-label">gasto total</span></div>
+          <div class="zeno-usage-card"><span class="zeno-usage-card-num">${fmtTokens(t.tokensIn + t.tokensOut)}</span><span class="zeno-usage-card-label">tokens</span></div>
+          <div class="zeno-usage-card"><span class="zeno-usage-card-num">${agg.sessions.length}</span><span class="zeno-usage-card-label">conversas</span></div>
+          <div class="zeno-usage-card"><span class="zeno-usage-card-num">${agg.models.length}</span><span class="zeno-usage-card-label">modelos</span></div>
+        </div>
+        <div class="mt-7">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <h3 class="typography-ui-label font-semibold text-foreground">Gráficos</h3>
+            ${tplSegGroup('Chart type', 'data-usage-chart', chart, [['bars', 'Barras', 'oc-bar-chart-2'], ['donut', 'Rosca', 'oc-donut-chart'], ['days', 'Dias', 'oc-pulse']])}
+          </div>
+          <div class="zeno-usage-chart mt-3">${chartBody || '<div class="zeno-usage-empty">Sem dados para o gráfico.</div>'}</div>
+        </div>
+        <div class="mt-7">
+          <h3 class="typography-ui-label font-semibold text-foreground">Conversas</h3>
+          <div class="mt-3 max-w-[34rem] space-y-1.5">${sessionsList}</div>
         </div>
       </div>`;
     }
     if (sec === 'Projects') {
       const blocks = state.projects.length ? state.projects.map((p) => {
         const chats = projectSessions(p.id).length;
-        return `<div class="zeno-setting-block" data-project-block="${p.id}">
+        return `<div class="zeno-setting-block" data-entity="${p.id}">
           <div class="zeno-setting-block-head">
-            <input data-project-name="${p.id}" value="${esc(p.name)}" spellcheck="false" autocomplete="off" aria-label="Project name"
-              class="zeno-setting-block-title">
-            <span class="zeno-setting-block-meta">${chats} chat${chats === 1 ? '' : 's'}</span>
+            <span class="zeno-block-name" title="${esc(p.name)}">${esc(p.name)}</span>
+            <span class="zeno-block-actions">
+              <button type="button" data-name-edit aria-label="Renomear" title="Renomear">${icon('oc-edit', 'remixicon h-3.5 w-3.5')}</button>
+              <button type="button" data-delete aria-label="Apagar" title="Apagar" class="is-danger">${icon('oc-delete-bin', 'remixicon h-3.5 w-3.5')}</button>
+            </span>
           </div>
-          <div class="zeno-setting-block-folders">
-            ${(p.folders || []).map((f, i) => `<span class="project-folder-chip"><span class="project-folder-name">${esc(f)}</span><button type="button" data-project-rmfolder="${p.id}" data-folder-index="${i}" aria-label="Remove folder">${icon('oc-close', 'remixicon h-3 w-3')}</button></span>`).join('') || '<span class="project-folder-empty">Sem pastas.</span>'}
-          </div>
-          <div class="zeno-setting-block-row">
-            <input data-project-addfolder="${p.id}" placeholder="Adicionar pasta…" spellcheck="false" autocomplete="off" class="h-7 min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 text-xs text-foreground outline-none">
-            <button type="button" data-project-newchat="${p.id}" class="zeno-mini-btn">Novo chat</button>
-            <button type="button" data-project-delete="${p.id}" class="zeno-mini-btn is-danger">Excluir</button>
-          </div>
+          <div class="zeno-setting-block-meta">${chats} chat${chats === 1 ? '' : 's'}</div>
         </div>`;
-      }).join('') : '<div class="py-6 text-center text-sm text-muted-foreground">Nenhum projeto ainda. Crie o primeiro abaixo.</div>';
+      }).join('') : '<div class="zeno-blocks-empty">Os projetos aparecem aqui quando criados pelo agente ou pelo botão de projeto da barra lateral.</div>';
       return `
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Projects</h2>
-        <p class="typography-meta mt-1 text-muted-foreground">Blocos editáveis: renomeie, ajuste pastas e abra chats.</p>
-        <div class="mt-6 max-w-[34rem] space-y-3">${blocks}</div>
-        <button type="button" data-action="project-create-inline" class="mt-4 inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground transition-colors">${icon('oc-add', 'remixicon h-3.5 w-3.5')}Novo projeto</button>
+        <p class="typography-meta mt-1 text-muted-foreground">Renomeie pelo lápis; apague pelo lixeira (com confirmação).</p>
+        <div class="zeno-settings-grid mt-6">${blocks}</div>
       </div>`;
     }
     if (sec === 'Remote Instances') {
-      const cards = state.remotes.length ? state.remotes.map((r) => `
-        <div class="zeno-setting-block" data-remote-block="${r.id}">
+      const cards = state.remotes.map((r) => `
+        <div class="zeno-setting-block" data-entity="${r.id}">
           <div class="zeno-setting-block-head">
-            <input data-remote-name="${r.id}" value="${esc(r.name)}" spellcheck="false" autocomplete="off" aria-label="Remote name" class="zeno-setting-block-title">
-            <span class="zeno-remote-type">${esc(r.type.toUpperCase())}</span>
+            <span class="zeno-block-name" title="${esc(r.name)}">${esc(r.name)}</span>
+            <span class="zeno-block-actions">
+              <button type="button" data-name-edit aria-label="Renomear" title="Renomear">${icon('oc-edit', 'remixicon h-3.5 w-3.5')}</button>
+              <button type="button" data-delete aria-label="Apagar" title="Apagar" class="is-danger">${icon('oc-delete-bin', 'remixicon h-3.5 w-3.5')}</button>
+            </span>
           </div>
-          <div class="zeno-remote-target">${esc(r.type === 'colab' ? r.url : `${r.user}@${r.host}:${r.port}`)}</div>
+          <div class="zeno-remote-target">${esc(r.type === 'colab' ? (r.url || 'colab') : `${r.user || 'root'}@${r.host}${r.port ? ':' + r.port : ''}`)}</div>
           <code class="zeno-remote-cmd">${esc(remoteConnectCmd(r))}</code>
           <div class="zeno-setting-block-row">
+            ${r.password ? '<span class="zeno-setting-block-meta">senha configurada</span>' : ''}
+            <span class="flex-1"></span>
             <button type="button" data-remote-copy="${r.id}" class="zeno-mini-btn">Copiar comando</button>
-            <button type="button" data-remote-delete="${r.id}" class="zeno-mini-btn is-danger">Remover</button>
           </div>
-        </div>`).join('') : '<div class="py-6 text-center text-sm text-muted-foreground">Nenhuma instância. Adicione uma VPS, VM ou Colab.</div>';
+        </div>`).join('');
+      const addForm = `
+        <form data-remote-ssh-form class="mt-3 max-w-[34rem] space-y-3">
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            ${tplSettingsField('Nome da instância', tplSettingsInput('data-ssh-field="name"', '', 'text', 'ex.: prod-vps'))}
+            ${tplSettingsField('Usuário SSH', tplSettingsInput('data-ssh-field="user"', '', 'text', 'ex.: root'))}
+            ${tplSettingsField('Host', tplSettingsInput('data-ssh-field="host"', '', 'text', 'ex.: 203.0.113.10'))}
+            ${tplSettingsField('Porta', tplSettingsInput('data-ssh-field="port"', '22', 'text', '22'))}
+          </div>
+          ${tplSettingsField('Senha SSH (opcional)', tplSettingsInput('data-ssh-field="password"', '', 'password', '••••••••'))}
+          <div class="flex items-center gap-2">
+            <button type="submit" class="zeno-mini-btn">Adicionar</button>
+            <button type="button" data-remote-add-cancel class="zeno-mini-btn">Cancelar</button>
+          </div>
+        </form>`;
       return `
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Remote Instances</h2>
-        <p class="typography-meta mt-1 text-muted-foreground">VPS, VM ou Google Colab para rodar o Zeno longe daqui.</p>
-        <div class="mt-6 max-w-[34rem] space-y-3">${cards}</div>
-        <form data-remote-form class="mt-4 grid max-w-[34rem] grid-cols-1 gap-2 sm:grid-cols-[110px_1fr_1fr_auto]">
-          <select data-remote-type class="h-8 rounded-md border border-border bg-transparent px-2 text-sm text-foreground outline-none" style="background: var(--background);">
-            <option value="vps">VPS</option><option value="vm">VM</option><option value="colab">Colab</option>
-          </select>
-          <input data-remote-name-input required placeholder="Nome (ex.: prod)" autocomplete="off" class="h-8 rounded-md border border-border bg-transparent px-2 text-sm text-foreground outline-none">
-          <input data-remote-target-input required placeholder="user@host:22 ou URL do Colab" autocomplete="off" spellcheck="false" class="h-8 rounded-md border border-border bg-transparent px-2 text-sm text-foreground outline-none">
-          <button type="submit" class="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-sm text-foreground">Adicionar</button>
-        </form>
+        <p class="typography-meta mt-1 text-muted-foreground">Servidores SSH para rodar o Zeno longe daqui.</p>
+        <div class="zeno-settings-grid mt-6">
+          ${cards}
+          <div class="zeno-setting-block zeno-add-block" data-remote-add role="button" tabindex="0" aria-label="Adicionar instância SSH">
+            ${icon('oc-add', 'remixicon h-4 w-4')}<span>Adicionar instância SSH</span>
+          </div>
+        </div>
+        ${state.remoteFormOpen ? addForm : ''}
         <p data-remote-error class="project-form-error" role="alert"></p>
       </div>`;
     }
     if (sec === 'Plugins') {
       const cards = state.plugins.length ? state.plugins.map((p) => `
-        <div class="zeno-setting-block" data-plugin-block="${p.id}">
+        <div class="zeno-setting-block" data-entity="${p.id}">
           <div class="zeno-setting-block-head">
-            <input data-plugin-name="${p.id}" value="${esc(p.name)}" spellcheck="false" autocomplete="off" aria-label="Plugin name" class="zeno-setting-block-title">
-            <span class="zeno-setting-block-meta">v${esc(p.version || '1.0.0')}</span>
-            <button type="button" data-plugin-toggle="${p.id}" aria-pressed="${p.enabled ? 'true' : 'false'}" class="zeno-toggle ${p.enabled ? 'is-on' : ''}" aria-label="Ativar plugin" title="${p.enabled ? 'Desativar' : 'Ativar'}"><span></span></button>
+            <span class="zeno-block-name" title="${esc(p.name)}">${esc(p.name)}</span>
+            <span class="zeno-block-actions">
+              <button type="button" data-plugin-toggle="${p.id}" aria-pressed="${p.enabled ? 'true' : 'false'}" class="zeno-toggle ${p.enabled ? 'is-on' : ''}" title="${p.enabled ? 'Desativar' : 'Ativar'}" aria-label="Ativar plugin"><span></span></button>
+              <button type="button" data-name-edit aria-label="Renomear" title="Renomear">${icon('oc-edit', 'remixicon h-3.5 w-3.5')}</button>
+              <button type="button" data-delete aria-label="Apagar" title="Apagar" class="is-danger">${icon('oc-delete-bin', 'remixicon h-3.5 w-3.5')}</button>
+            </span>
           </div>
-          <p class="zeno-plugin-desc">${esc(p.description || '')}</p>
+          <p class="zeno-plugin-desc">${esc(p.description || 'Sem descrição.')}</p>
           <div class="zeno-setting-block-row">
-            <span class="zeno-setting-block-meta">${(p.functions || []).length} funções · ${(p.buttons || []).length} botões · ${(p.agents || []).length} agentes</span>
-            <span class="flex-1"></span>
-            <button type="button" data-plugin-json="${p.id}" class="zeno-mini-btn">Ver JSON</button>
-            <button type="button" data-plugin-delete="${p.id}" class="zeno-mini-btn is-danger">Excluir</button>
+            <span class="zeno-setting-block-meta">v${esc(p.version || '1.0.0')}</span>
+            <span class="zeno-plugin-state ${p.enabled ? 'is-on' : ''}">${p.enabled ? 'Ativo' : 'Inativo'}</span>
           </div>
-        </div>`).join('') : '<div class="py-6 text-center text-sm text-muted-foreground">Nenhum plugin. Peça ao agente (“crie um plugin…”) ou crie abaixo.</div>';
+        </div>`).join('') : '<div class="zeno-blocks-empty">Peça ao agente no chat (\“crie um plugin…\”) e ele aparece aqui.</div>';
       const active = state.plugins.filter((p) => p.enabled);
       return `
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Plugins</h2>
-        <p class="typography-meta mt-1 text-muted-foreground">JSON: ative, desative e renomeie. Aplicados: ${active.length}.</p>
-        <div class="mt-6 max-w-[34rem] space-y-3">${cards}</div>
-        <form data-plugin-form class="mt-4 max-w-[34rem] space-y-2">
-          <input data-plugin-req-name placeholder="Nome do plugin (ex.: Resumo de e-mails)" autocomplete="off" class="h-8 w-full rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none">
-          <textarea data-plugin-req-input required rows="2" placeholder="O que o plugin deve fazer? (ex.: resume textos longos em 3 bullets)" class="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm text-foreground outline-none"></textarea>
-          <button type="submit" class="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-sm text-foreground">Gerar e salvar plugin</button>
-        </form>
-        <p data-plugin-error class="project-form-error" role="alert"></p>
+        <p class="typography-meta mt-1 text-muted-foreground">Ative pelo interruptor, renomeie pelo lápis. Aplicados: ${active.length}.</p>
+        <div class="zeno-settings-grid mt-6">${cards}</div>
       </div>`;
     }
     return `
@@ -1994,12 +2386,12 @@
 
   const openMemoryEditor = (note, isNew = false) => {
     state.noteId = note.id;
-    state.memoryEditor = { id: note.id, title: note.title, content: note.content, isNew };
+    state.memoryEditor = { id: note.id, title: note.title, content: memoryContentForEditor(note.kind || KIND_FROM_TAG[note.tag] || 'note', note.content), kind: note.kind || KIND_FROM_TAG[note.tag] || 'note', isNew };
     render();
   };
 
-  const createMemoryNoteAt = (x, y) => {
-    const note = { id: 'memory_' + uid(), title: 'Untitled note', tag: 'Note', excerpt: '', content: '# Untitled note\n\nStart writing here.', accent: '#fff', x, y, updated: 'agora', by: 'User' };
+  const createMemoryNoteAt = (x, y, kind = 'note') => {
+    const note = { id: 'memory_' + uid(), title: memoryTitleFor(kind), kind, tag: NOTE_KINDS[kind] || 'Note', excerpt: '', content: memoryTemplateFor(kind), accent: NOTE_ACCENTS[kind] || '#fff', x, y, updated: 'agora', by: 'User' };
     state.memoryNotes.push(note);
     openMemoryEditor(note, true);
   };
@@ -2086,6 +2478,17 @@
         render();
       });
       const stopDragging = () => {
+        if (draggedNode) {
+          /* Persiste a posição arrastada e fixa o nó (não é re-layoutado). */
+          const note = state.memoryNotes.find((item) => item.id === draggedNode.dataset.memoryNote);
+          if (note) {
+            const matrix = draggedNode.transform.baseVal.getItem(0).matrix;
+            note.x = Math.max(4, Math.min(96, matrix.e / 16));
+            note.y = Math.max(10, Math.min(90, matrix.f / 9));
+            note.pinned = true;
+            LS.set('oc-clone-memory-notes', state.memoryNotes);
+          }
+        }
         dragging = false;
         draggedNode?.classList.remove('is-dragging');
         draggedNode = null;
@@ -2157,20 +2560,70 @@
     });
     $('[data-action="memory-refresh"]', rootEl)?.addEventListener('click', () => { void refreshMemoryFromBackend().then(() => render()); });
     $('[data-action="memory-new"]', rootEl)?.addEventListener('click', () => createMemoryNoteAt(50, 52));
+    /* Configuração da rede (cores MCP/Skill, espaçamento, rótulos) */
+    $('[data-action="memory-config"]', rootEl)?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      state.memoryConfigOpen = !state.memoryConfigOpen;
+      render();
+    });
+    $('[data-memory-config]', rootEl)?.addEventListener('click', (event) => event.stopPropagation());
+    $$('[data-memory-config-color]', rootEl).forEach((input) => input.addEventListener('change', () => {
+      state.memoryConfig[input.dataset.memoryConfigColor] = input.value;
+      LS.set('oc-clone-memory-config', state.memoryConfig);
+      render();
+    }));
+    $$('[data-memory-config-range]', rootEl).forEach((input) => input.addEventListener('change', () => {
+      state.memoryConfig.spacing = Number(input.value) || 1;
+      LS.set('oc-clone-memory-config', state.memoryConfig);
+      state.memoryLayoutPending = true;
+      render();
+    }));
+    $$('[data-memory-config-check]', rootEl).forEach((input) => input.addEventListener('change', () => {
+      state.memoryConfig.labels = input.checked;
+      LS.set('oc-clone-memory-config', state.memoryConfig);
+      render();
+    }));
+    $('[data-action="memory-relayout"]', rootEl)?.addEventListener('click', () => {
+      state.memoryNotes.forEach((note) => { delete note.pinned; });
+      state.memoryLayoutPending = true;
+      state.memoryConfigOpen = false;
+      LS.set('oc-clone-memory-notes', state.memoryNotes);
+      render();
+    });
+    /* Troca de tipo do editor (MCP = JSON, Skill = Markdown) */
+    $$('[data-memory-kind]', rootEl).forEach((select) => select.addEventListener('change', () => {
+      if (!state.memoryEditor) return;
+      const kind = select.value;
+      const previous = state.memoryEditor.kind;
+      state.memoryEditor.kind = kind;
+      const content = String(state.memoryEditor.content || '');
+      const isDefault = Object.keys(NOTE_KINDS).some((k) => memoryTemplateFor(k) === content.trim());
+      if (isDefault || !content.trim()) {
+        state.memoryEditor.title = memoryTitleFor(kind) !== 'Untitled note' ? memoryTitleFor(kind) : state.memoryEditor.title;
+        state.memoryEditor.content = memoryTemplateFor(kind);
+      } else if (kind === 'mcp') {
+        state.memoryEditor.content = memoryContentForEditor('mcp', content);
+      }
+      render();
+    }));
     $('[data-action="edit-memory-note"]', rootEl)?.addEventListener('click', () => openMemoryEditor(memoryNoteById(state.noteId)));
     $('[data-action="save-memory-note"]', rootEl)?.addEventListener('click', () => {
       const note = memoryNoteById(state.noteId);
       if (!note) return;
       const isNew = !!state.memoryEditor?.isNew;
+      const kind = ($('[data-memory-kind]', rootEl)?.value) || state.memoryEditor?.kind || 'note';
       note.title = $('[data-memory-title]', rootEl).value.trim() || 'Untitled note';
       note.content = $('[data-memory-content]', rootEl).value;
+      note.kind = kind;
+      note.tag = NOTE_KINDS[kind] || 'Note';
+      note.accent = noteAccent(note);
       note.excerpt = note.content.replace(/[`*_#\n]/g, ' ').trim().slice(0, 116);
       state.memoryEditor = null;
       LS.set('oc-clone-memory-notes', state.memoryNotes);
       render();
       if (!state.backendOk) return;
       if (isNew) {
-        void ZenoBackend.addNote({ title: note.title, content: note.content, kind: 'note', tags_json: '[]' }).then((saved) => {
+        void ZenoBackend.addNote({ title: note.title, content: note.content, kind: note.kind || 'note', tags_json: '[]' }).then((saved) => {
           if (!saved || !saved.id) return;
           const index = state.memoryNotes.findIndex((item) => item.id === note.id);
           if (index < 0) return;
@@ -2694,7 +3147,7 @@
   const loadDeepgramConfig = async () => {
     if (deepgramConfigCache) return deepgramConfigCache;
     const config = {
-      apiKey: window.DEEPGRAM_API_KEY || '',
+      apiKey: window.DEEPGRAM_API_KEY || LS.get('oc-clone-voice-deepgram-key', '') || '',
       language: window.DEEPGRAM_LANGUAGE || 'pt-BR',
       model: window.DEEPGRAM_MODEL || 'nova-3',
     };
@@ -3319,7 +3772,7 @@
       id: live.id, role: 'assistant', time: fmtTime(now()), model: live.model, agent: live.agent,
       thinking: live.thinking,
       tools: live.tools.map((tool) => ({ title: tool.title, cmd: tool.cmd, output: tool.output, duration: tool.duration, ok: tool.ok })),
-      text: live.text, error: live.error || '', duration: live.duration,
+      text: live.text, error: live.error || '', duration: live.duration, createdAt: new Date().toISOString(),
       tokensIn: live.tokensIn, tokensOut: live.tokensOut, status: live.status,
     });
     state.liveRun = null;
@@ -3373,7 +3826,7 @@
     if (state.draftNew) createSession(state.activeProjectId || null);
     const s = activeSession();
     if (!s) return false;
-    s.messages.push({ id: 'msg_' + uid(), role: 'user', text: clean, time: fmtTime(now()), snapshot: captureWorkspaceSnapshot() });
+    s.messages.push({ id: 'msg_' + uid(), role: 'user', text: clean, time: fmtTime(now()), createdAt: new Date().toISOString(), snapshot: captureWorkspaceSnapshot() });
     if (state.backendOk) {
       startBackendRun(s, clean);
       return true;
@@ -4123,13 +4576,72 @@
     render();
   };
 
+  /* ---------- confirm overlay: escurece a tela antes de apagar ---------- */
+  const settingsConfirm = (rootEl, title, message, onConfirm) => {
+    document.querySelector('[data-settings-confirm]')?.remove();
+    const overlay = document.createElement('div');
+    overlay.dataset.settingsConfirm = 'true';
+    overlay.className = 'zeno-confirm-overlay';
+    overlay.innerHTML = `
+      <div class="zeno-confirm-card" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+        <h3>${esc(title)}</h3>
+        <p>${esc(message)}</p>
+        <div class="zeno-confirm-actions">
+          <button type="button" data-confirm-cancel class="zeno-confirm-btn">Cancelar</button>
+          <button type="button" data-confirm-ok class="zeno-confirm-btn is-danger">Apagar</button>
+        </div>
+      </div>`;
+    const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('[data-confirm-cancel]').addEventListener('click', close);
+    overlay.querySelector('[data-confirm-ok]').addEventListener('click', () => { close(); onConfirm(); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+  };
+
+  /* Renomear inline: o editor aparece no lugar do texto do bloco. */
+  const bindInlineRename = (rootEl, commit) => {
+    $$('[data-name-edit]', rootEl).forEach((btn) => btn.addEventListener('click', () => {
+      const block = btn.closest('[data-entity]');
+      const id = block?.dataset.entity;
+      const span = block?.querySelector('.zeno-block-name');
+      if (!block || !span || block.querySelector('.zeno-block-name-input')) return;
+      const current = span.textContent;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'zeno-block-name-input';
+      input.value = current;
+      input.setAttribute('aria-label', 'Renomear');
+      span.replaceWith(input);
+      input.focus();
+      input.select();
+      let cancelled = false;
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        else if (e.key === 'Escape') { cancelled = true; input.blur(); }
+      });
+      input.addEventListener('blur', () => {
+        const value = input.value.trim();
+        if (!cancelled && value && value !== current) commit(id, value.slice(0, 120));
+        refreshSettingsContent(rootEl);
+        render();
+      }, { once: true });
+    }));
+  };
+
   const bindSettingsSection = (rootEl) => {
     /* Integração ZenoC: aba Models */
     $('[data-action="models-save"]', rootEl)?.addEventListener('click', async () => {
       const value = (field) => ($(`[data-models-field="${field}"]`, rootEl)?.value || '').trim();
+      let baseUrl = value('base_url');
+      if (baseUrl) {
+        baseUrl = baseUrl.replace(/\/chat\/completions\/?$/i, '').replace(/\/+$/, '');
+        if (!/^https?:\/\//i.test(baseUrl)) baseUrl = `https://${baseUrl}`;
+      }
       const payload = {
         provider: value('provider') || 'openai',
-        base_url: value('base_url'),
+        base_url: baseUrl,
         model: value('model'),
         fallback_models: value('fallback_models'),
         workspace: value('workspace') || '.',
@@ -4152,6 +4664,18 @@
       }
     });
     $('[data-action="models-refresh"]', rootEl)?.addEventListener('click', () => { void refreshModels(rootEl, true); });
+    $('[data-action="models-test"]', rootEl)?.addEventListener('click', async () => {
+      flashSettingsNote(rootEl, 'Testando conexão com o provider…');
+      let answer = '';
+      try {
+        await ZenoBackend.chat({ message: 'Responda apenas com a palavra: pong', session: `probe_${uid()}` }, (event) => {
+          if (event.type === 'text') answer += event.delta || '';
+        });
+        flashSettingsNote(rootEl, answer.trim() ? `Conexão OK — ${state.model} respondeu.` : 'Conexão estabelecida, mas o provider não devolveu texto.');
+      } catch (error) {
+        flashSettingsNote(rootEl, `Falha na conexão: ${error.message || 'erro desconhecido'}`);
+      }
+    });
     $$('[data-action="models-pick"]', rootEl).forEach((button) => button.addEventListener('click', async () => {
       state.model = button.dataset.model;
       LS.set('oc-clone-model', state.model);
@@ -4226,6 +4750,8 @@
       else if (field === 'voice.stt') { state.voiceSttModel = value; LS.set('oc-clone-voice-stt', value); }
       else if (field === 'voice.tts') { state.voiceTtsModel = value; LS.set('oc-clone-voice-tts', value); }
       else if (field === 'voice.openaiKey') { LS.set('oc-clone-voice-openai-key', value); }
+      else if (field === 'voice.deepgramKey') { LS.set('oc-clone-voice-deepgram-key', value); deepgramConfigCache = null; }
+      else if (field === 'app.installName') { state.installAppName = value.trim().slice(0, 60) || 'OpenChamber'; LS.set('oc-clone-install-app-name', state.installAppName); }
       else return;
       refreshSettingsContent(rootEl);
     }));
@@ -4254,93 +4780,65 @@
       LS.set('oc-clone-shortcuts', state.shortcuts);
       refreshSettingsContent(rootEl);
     });
-    /* Projects: blocos editáveis */
-    $$('[data-project-name]', rootEl).forEach((el) => el.addEventListener('change', () => {
-      const project = state.projects.find((p) => p.id === el.dataset.projectName);
-      if (!project) return;
-      const name = el.value.trim();
-      if (!name) { el.value = project.name; return; }
-      project.name = name.slice(0, 120);
-      LS.set('oc-clone-projects', state.projects);
-      refreshSettingsContent(rootEl);
-      render();
-    }));
-    $$('[data-project-addfolder]', rootEl).forEach((el) => el.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter') return;
-      e.preventDefault();
-      const project = state.projects.find((p) => p.id === el.dataset.projectAddfolder);
-      const folder = el.value.trim();
-      if (!project || !folder) return;
-      project.folders = [...(project.folders || []), folder].slice(0, 32);
-      LS.set('oc-clone-projects', state.projects);
-      refreshSettingsContent(rootEl);
-    }));
-    $$('[data-project-rmfolder]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      const project = state.projects.find((p) => p.id === b.dataset.projectRmfolder);
-      if (!project) return;
-      project.folders = (project.folders || []).filter((_, i) => i !== Number(b.dataset.folderIndex));
-      LS.set('oc-clone-projects', state.projects);
-      refreshSettingsContent(rootEl);
-    }));
-    $$('[data-project-newchat]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      const project = state.projects.find((p) => p.id === b.dataset.projectNewchat);
-      state.workspace = 'chat';
-      state.noteId = null;
-      state.panel = null;
-      state.activeProjectId = project ? project.id : null;
-      persistWorkspace();
-      createSession(state.activeProjectId);
-      state.settings = false;
-      render();
-    }));
-    $$('[data-project-delete]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      deleteProjectById(b.dataset.projectDelete);
-      refreshSettingsContent(rootEl);
-      render();
-    }));
-    $('[data-action="project-create-inline"]', rootEl)?.addEventListener('click', () => {
-      const project = { id: uid(), name: `Projeto ${state.projects.length + 1}`, folders: [], createdAt: new Date().toISOString() };
-      state.projects.push(project);
-      LS.set('oc-clone-projects', state.projects);
-      state.activeProjectId = project.id;
-      LS.set('oc-clone-active-project', state.activeProjectId);
-      refreshSettingsContent(rootEl);
-      render();
+    /* Projects / Remote Instances / Plugins: grid de blocos com renomear inline */
+    bindInlineRename(rootEl, (id, name) => {
+      const project = state.projects.find((p) => p.id === id);
+      if (project) { project.name = name; LS.set('oc-clone-projects', state.projects); return; }
+      const remote = state.remotes.find((r) => r.id === id);
+      if (remote) { remote.name = name.slice(0, 80); persistRemotes(); return; }
+      const plugin = state.plugins.find((p) => p.id === id);
+      if (plugin) { plugin.name = name.slice(0, 80); persistPlugins(); }
     });
-    /* Remote instances: VPS, VM, Colab */
-    $('[data-remote-form]', rootEl)?.addEventListener('submit', (e) => {
+    /* Apagar: escurece a tela atrás e pede confirmação. */
+    $$('[data-entity] [data-delete]', rootEl).forEach((btn) => btn.addEventListener('click', () => {
+      const block = btn.closest('[data-entity]');
+      const id = block?.dataset.entity;
+      if (!id) return;
+      const project = state.projects.find((p) => p.id === id);
+      const remote = state.remotes.find((r) => r.id === id);
+      const plugin = state.plugins.find((p) => p.id === id);
+      const label = project?.name || remote?.name || plugin?.name || 'este item';
+      settingsConfirm(rootEl, `Apagar “${label}”?`, 'Essa ação não pode ser desfeita.', () => {
+        if (project) { deleteProjectById(id); return; }
+        if (remote) { state.remotes = state.remotes.filter((r) => r.id !== id); persistRemotes(); }
+        else if (plugin) { state.plugins = state.plugins.filter((p) => p.id !== id); persistPlugins(); applyPluginCss(); }
+        render();
+      });
+    }));
+    /* Remote Instances: bloco "adicionar" abre o formulário SSH. */
+    const toggleRemoteForm = (open) => {
+      state.remoteFormOpen = open;
+      refreshSettingsContent(rootEl);
+      if (open) $('[data-ssh-field="name"]', rootEl)?.focus();
+    };
+    const remoteAddEl = $('[data-remote-add]', rootEl);
+    remoteAddEl?.addEventListener('click', () => toggleRemoteForm(!state.remoteFormOpen));
+    remoteAddEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRemoteForm(!state.remoteFormOpen); } });
+    $('[data-remote-add-cancel]', rootEl)?.addEventListener('click', () => toggleRemoteForm(false));
+    $('[data-remote-ssh-form]', rootEl)?.addEventListener('submit', (e) => {
       e.preventDefault();
-      const type = $('[data-remote-type]', rootEl)?.value || 'vps';
-      const name = ($('[data-remote-name-input]', rootEl)?.value || '').trim();
-      const target = ($('[data-remote-target-input]', rootEl)?.value || '').trim();
-      const { remote, error } = remoteAdd(type, name, target);
+      const field = (f) => ($(`[data-ssh-field="${f}"]`, rootEl)?.value || '').trim();
+      const name = field('name');
+      const user = field('user') || 'root';
+      const host = field('host');
+      const port = Number(field('port')) || 22;
+      const password = field('password');
       const errEl = $('[data-remote-error]', rootEl);
-      if (error) { if (errEl) errEl.textContent = error; return; }
-      state.remotes.push(remote);
+      if (!name || !host) { if (errEl) errEl.textContent = 'Informe nome e host da instância.'; return; }
+      if (port < 1 || port > 65535) { if (errEl) errEl.textContent = 'Porta inválida (1–65535).'; return; }
+      state.remotes.push({ id: 'rem_' + uid(), name: name.slice(0, 80), type: 'ssh', user, host, port, password, url: '', createdAt: new Date().toISOString() });
       persistRemotes();
-      refreshSettingsContent(rootEl);
+      toggleRemoteForm(false);
+      render();
     });
-    $$('[data-remote-name]', rootEl).forEach((el) => el.addEventListener('change', () => {
-      const remote = state.remotes.find((r) => r.id === el.dataset.remoteName);
-      if (!remote) return;
-      const name = el.value.trim();
-      if (!name) { el.value = remote.name; return; }
-      remote.name = name.slice(0, 80);
-      persistRemotes();
-      refreshSettingsContent(rootEl);
-    }));
+    /* Copiar comando ssh do bloco */
     $$('[data-remote-copy]', rootEl).forEach((b) => b.addEventListener('click', async () => {
       const remote = state.remotes.find((r) => r.id === b.dataset.remoteCopy);
       if (!remote) return;
       try { await navigator.clipboard.writeText(remoteConnectCmd(remote)); flashSettingsNote(rootEl, 'Comando copiado.'); }
       catch { flashSettingsNote(rootEl, remoteConnectCmd(remote)); }
     }));
-    $$('[data-remote-delete]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      state.remotes = state.remotes.filter((r) => r.id !== b.dataset.remoteDelete);
-      persistRemotes();
-      refreshSettingsContent(rootEl);
-    }));
-    /* Plugins: ativar, desativar, renomear, criar */
+    /* Plugins: ativar/desativar pelo interruptor do bloco */
     $$('[data-plugin-toggle]', rootEl).forEach((b) => b.addEventListener('click', () => {
       const plugin = state.plugins.find((p) => p.id === b.dataset.pluginToggle);
       if (!plugin) return;
@@ -4350,51 +4848,6 @@
       refreshSettingsContent(rootEl);
       render();
     }));
-    $$('[data-plugin-name]', rootEl).forEach((el) => el.addEventListener('change', () => {
-      const plugin = state.plugins.find((p) => p.id === el.dataset.pluginName);
-      if (!plugin) return;
-      const name = el.value.trim();
-      if (!name) { el.value = plugin.name; return; }
-      plugin.name = name.slice(0, 80);
-      persistPlugins();
-      refreshSettingsContent(rootEl);
-      render();
-    }));
-    $$('[data-plugin-json]', rootEl).forEach((b) => b.addEventListener('click', async () => {
-      const plugin = state.plugins.find((p) => p.id === b.dataset.pluginJson);
-      if (!plugin) return;
-      try { await navigator.clipboard.writeText(JSON.stringify(plugin, null, 2)); flashSettingsNote(rootEl, 'JSON copiado.'); }
-      catch { flashSettingsNote(rootEl, `Plugin ${plugin.id} v${plugin.version}.`); }
-    }));
-    $$('[data-plugin-delete]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      state.plugins = state.plugins.filter((p) => p.id !== b.dataset.pluginDelete);
-      persistPlugins();
-      applyPluginCss();
-      refreshSettingsContent(rootEl);
-      render();
-    }));
-    $('[data-plugin-form]', rootEl)?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const nameHint = ($('[data-plugin-req-name]', rootEl)?.value || '').trim();
-      const request = ($('[data-plugin-req-input]', rootEl)?.value || '').trim();
-      const errEl = $('[data-plugin-error]', rootEl);
-      const plugin = pluginCreate(request, nameHint);
-      if (!plugin) { if (errEl) errEl.textContent = 'Descreva o que o plugin deve fazer.'; return; }
-      if (state.plugins.some((p) => p.id === plugin.id)) plugin.id = `${plugin.id}-${uid().slice(0, 4)}`;
-      state.plugins.push(plugin);
-      persistPlugins();
-      applyPluginCss();
-      refreshSettingsContent(rootEl);
-      render();
-    });
-    /* Appearance: nome do app (o conteúdo é recriado a cada seção) */
-    $$('[data-settings-content] input[value="OpenChamber"]', rootEl).forEach((inp) => {
-      inp.value = state.installAppName;
-      inp.addEventListener('change', () => {
-        state.installAppName = inp.value.trim().slice(0, 60) || 'OpenChamber';
-        LS.set('oc-clone-install-app-name', state.installAppName);
-      });
-    });
   };
 
   const flashSettingsNote = (rootEl, text) => {
@@ -4417,13 +4870,33 @@
       state.settingsSection = b.dataset.settingsSection;
       refreshSettingsContent(rootEl);
     }));
-    $$('[data-radio]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      state.colorMode = b.dataset.radio.toLowerCase();
+    /* Modo de cor: seletor segmentado com ✓ no item escolhido. */
+    $$('[data-color-mode]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      state.colorMode = b.dataset.colorMode;
       LS.set('oc-clone-color-mode', state.colorMode);
       applyTheme();
       refreshSettingsContent(rootEl);
+      render();
     }));
-    /* Appearance: os selects de idioma/formato/orientação usam o menu acima */
+    /* Tipo de gráfico do Usage. */
+    $$('[data-usage-chart]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      state.usageChart = b.dataset.usageChart;
+      LS.set('oc-clone-usage-chart', state.usageChart);
+      refreshSettingsContent(rootEl);
+    }));
+    /* Clicar numa conversa do Usage abre ela no workspace. */
+    $$('[data-usage-session]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      const id = b.dataset.usageSession;
+      if (!state.sessions.some((s) => s.id === id)) return;
+      state.activeId = id;
+      state.draftNew = false;
+      state.workspace = 'chat';
+      state.settings = false;
+      LS.set('oc-clone-active', id);
+      persistWorkspace();
+      render();
+    }));
+    /* Appearance/Chat: os selects de tema/idioma/formato/orientação usam o menu acima */
     $('[data-action="reload-themes"]', rootEl)?.addEventListener('click', () => { applyTheme(); refreshSettingsContent(rootEl); render(); });
     bindSettingsSection(rootEl);
   };

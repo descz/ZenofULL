@@ -379,6 +379,79 @@ static void handle_zenoc(int fd, const char *method, const char *uri, const char
         return;
     }
     /* Cancela o run ativo */
+    if (!strcmp(uri, "/api/zenoc/plugins") && !strcmp(method, "GET")) {
+        char *json = zeno_bridge_plugins_json();
+        send_json(fd, json);
+        free(json);
+        return;
+    }
+    if (!strcmp(uri, "/api/zenoc/plugins/save") && !strcmp(method, "POST")) {
+        char *json = json_body_copy(body, blen);
+        char *error = NULL;
+        char *result = json != NULL ? zeno_bridge_plugins_save(json, &error) : NULL;
+        if (result != NULL) send_json(fd, result);
+        else send_json_error(fd, 400, "Bad Request", error != NULL ? error : "Plugin inválido.");
+        free(json);
+        free(result);
+        free(error);
+        return;
+    }
+    if (!strcmp(uri, "/api/zenoc/plugins/delete") && !strcmp(method, "POST")) {
+        char *json = json_body_copy(body, blen);
+        char id[160];
+        id[0] = '\0';
+        if (json != NULL) {
+            const char *start = strstr(json, "\"id\"");
+            if (start != NULL) {
+                start = strchr(start + 4, '"');
+                if (start != NULL) {
+                    start++;
+                    const char *end = strchr(start, '"');
+                    if (end != NULL && (size_t)(end - start) < sizeof(id)) {
+                        memcpy(id, start, (size_t)(end - start));
+                        id[end - start] = '\0';
+                    }
+                }
+            }
+        }
+        char *error = NULL;
+        char *result = id[0] != '\0' ? zeno_bridge_plugins_delete(id, &error) : NULL;
+        if (result != NULL) send_json(fd, result);
+        else send_json_error(fd, 400, "Bad Request", error != NULL ? error : "Plugin inválido.");
+        free(json);
+        free(result);
+        free(error);
+        return;
+    }
+    if (!strcmp(uri, "/api/zenoc/plugins/toggle") && !strcmp(method, "POST")) {
+        char *json = json_body_copy(body, blen);
+        char id[160];
+        id[0] = '\0';
+        int enabled = 0;
+        if (json != NULL) {
+            const char *start = strstr(json, "\"id\"");
+            if (start != NULL) {
+                start = strchr(start + 4, '"');
+                if (start != NULL) {
+                    start++;
+                    const char *end = strchr(start, '"');
+                    if (end != NULL && (size_t)(end - start) < sizeof(id)) {
+                        memcpy(id, start, (size_t)(end - start));
+                        id[end - start] = '\0';
+                    }
+                }
+            }
+            enabled = strstr(json, "\"enabled\":true") != NULL || strstr(json, "\"enabled\": true") != NULL;
+        }
+        char *error = NULL;
+        char *result = id[0] != '\0' ? zeno_bridge_plugins_toggle(id, enabled, &error) : NULL;
+        if (result != NULL) send_json(fd, result);
+        else send_json_error(fd, 400, "Bad Request", error != NULL ? error : "Plugin inválido.");
+        free(json);
+        free(result);
+        free(error);
+        return;
+    }
     if (!strcmp(uri, "/api/zenoc/cancel") && !strcmp(method, "POST")) {
         zeno_bridge_cancel();
         send_json(fd, "{\"ok\":true}");

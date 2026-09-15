@@ -65,4 +65,11 @@ char *zeno_bridge_memory_link_delete(const char *json, char **error);
 /* Skills indexadas da pasta skills/ (SKILL.md): [{id,name,description,path}]. */
 char *zeno_bridge_skills_json(void);
 
+/* Plugins (modificador do Zeno): ferramentas de código, botões, abas e
+ * campos de configuração, persistidos em <workspace>/.zeno/plugins.json. */
+char *zeno_bridge_plugins_json(void);
+char *zeno_bridge_plugins_save(const char *json, char **error);
+char *zeno_bridge_plugins_delete(const char *id, char **error);
+char *zeno_bridge_plugins_toggle(const char *id, int enabled, char **error);
+
 #endif /* ZENO_BRIDGE_H */

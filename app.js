@@ -76,6 +76,18 @@
     skills() {
       return this.fetchJSON('/api/zenoc/skills');
     },
+    plugins() {
+      return this.fetchJSON('/api/zenoc/plugins');
+    },
+    savePlugin(plugin) {
+      return this.fetchJSON('/api/zenoc/plugins/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(plugin) });
+    },
+    deletePlugin(id) {
+      return this.fetchJSON('/api/zenoc/plugins/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    },
+    togglePlugin(id, enabled) {
+      return this.fetchJSON('/api/zenoc/plugins/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, enabled }) });
+    },
     saveConfig(config) {
       return this.fetchJSON('/api/zenoc/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
     },
@@ -317,6 +329,122 @@
     return out;
   };
 
+  /* ---------- sugestão de follow-up gerada do contexto da conversa ---------- */
+  const SUGGESTION_STOPWORDS = new Set(['de', 'da', 'do', 'das', 'dos', 'para', 'pra', 'por', 'com', 'sem', 'que', 'como', 'qual', 'quais', 'quero', 'preciso', 'pode', 'ser', 'um', 'uma', 'uns', 'umas', 'o', 'a', 'os', 'as', 'e', 'ou', 'no', 'na', 'nos', 'nas', 'em', 'ao', 'aos', 'me', 'te', 'se', 'isso', 'esse', 'essa', 'este', 'esta', 'mais', 'menos', 'muito', 'muita', 'seu', 'sua', 'the', 'and', 'for', 'with', 'what', 'how', 'can', 'could', 'please', 'about', 'from', 'this', 'that', 'into', 'make', 'want', 'need', 'help']);
+  const deriveSuggestion = (session) => {
+    const msgs = session?.messages || [];
+    if (!msgs.length) return null;
+    const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant' && String(m.text || '').trim());
+    const lastUser = [...msgs].reverse().find((m) => m.role === 'user' && String(m.text || '').trim());
+    if (!lastUser) return null;
+    const assistantText = String(lastAssistant?.text || '');
+    const hasCode = /```|\bfunction\b|\bconst \b|\bdef \b|\bfor \(/.test(assistantText);
+    const userWords = String(lastUser.text)
+      .toLowerCase()
+      .replace(/[^a-zà-ú0-9_-]/gi, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 3 && !SUGGESTION_STOPWORDS.has(w))
+      .sort((a, b) => b.length - a.length);
+    const subject = userWords[0] || '';
+    const options = hasCode
+      ? ['Teste esse código', 'Adicione comentários ao código', 'Refatore o código acima']
+      : subject
+        ? [`Detalhe melhor ${subject}`, `Me dê um exemplo prático de ${subject}`, `Quais os próximos passos com ${subject}?`]
+        : ['Me aprofunde nesse tema', 'Resuma o que foi feito', 'Quais os próximos passos?'];
+    return options[msgs.filter((m) => m.role === 'assistant').length % options.length];
+  };
+
+  /* ---------- Usage: download TXT completo ---------- */
+  const downloadTxtFile = (filename, text) => {
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
+
+  const usageSessionTxtLines = (session) => {
+    const msgs = session?.messages || [];
+    if (!msgs.length) return null;
+    let tokensIn = 0, tokensOut = 0, cost = 0;
+    msgs.forEach((m) => {
+      if (m.role !== 'assistant') return;
+      const tin = Number(m.tokensIn) || 0;
+      const tout = Number(m.tokensOut) || 0;
+      tokensIn += tin;
+      tokensOut += tout;
+      cost += usageCostOf(m.model, tin, tout);
+    });
+    const lines = [];
+    lines.push('ZENO · USO DA CONVERSA');
+    lines.push('='.repeat(48));
+    lines.push(`Conversa: ${session.title || 'Sem título'}  (${session.id})`);
+    lines.push(`Atualizada: ${session.updatedAt || session.createdAt || '—'}`);
+    lines.push(`Tokens: entrada ${tokensIn} · saída ${tokensOut} · total ${tokensIn + tokensOut}`);
+    lines.push(`Custo estimado: ${fmtUSD(cost)}`);
+    lines.push('');
+    lines.push('TRANSCRIÇÃO COMPLETA (entradas, pensamentos, ferramentas e saídas)');
+    lines.push('-'.repeat(48));
+    let index = 0;
+    msgs.forEach((m) => {
+      index++;
+      if (m.role === 'user') {
+        lines.push('');
+        lines.push(`[${String(index).padStart(2, '0')}] VOCÊ (entrada) · ${m.time || ''}`);
+        lines.push(String(m.text || ''));
+        return;
+      }
+      if (m.role !== 'assistant') return;
+      lines.push('');
+      lines.push(`[${String(index).padStart(2, '0')}] ZENO · ${m.model || state.model || 'zeno'} · ${m.time || ''}`);
+      if (m.thinking) { lines.push('-- Pensamento --'); lines.push(String(m.thinking)); }
+      if (m.tools && m.tools.length) {
+        lines.push('-- Ferramentas --');
+        m.tools.forEach((tool) => {
+          lines.push(`- ${tool.title || 'Ferramenta'}${tool.ok === false ? ' (falhou)' : ' (ok)'}${tool.duration ? ` · ${tool.duration}` : ''}`);
+          if (tool.cmd) lines.push(`  comando: ${tool.cmd}`);
+          (tool.output || []).forEach((line) => lines.push(`  | ${line}`));
+        });
+      }
+      lines.push('-- Resposta (saída) --');
+      lines.push(String(m.text || ''));
+      const mtin = Number(m.tokensIn) || 0;
+      const mtout = Number(m.tokensOut) || 0;
+      if (mtin || mtout) lines.push(`tokens: ↑${mtin} ↓${mtout} · custo: ${fmtUSD(usageCostOf(m.model, mtin, mtout))}`);
+    });
+    return lines;
+  };
+
+  const usageDownloadSession = (sessionId) => {
+    const session = state.sessions.find((s) => s.id === sessionId);
+    const lines = usageSessionTxtLines(session);
+    if (!lines) return;
+    const slug = String(session.title || 'conversa').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'conversa';
+    downloadTxtFile(`zeno-uso-${slug}.txt`, lines.join('\n'));
+  };
+
+  const usageDownloadAll = () => {
+    const parts = [];
+    const agg = usageAggregate();
+    parts.push('ZENO · USO GERAL');
+    parts.push('='.repeat(48));
+    parts.push(`Total: ${fmtUSD(agg.total.cost)} · tokens ↑${agg.total.tokensIn} ↓${agg.total.tokensOut} · ${agg.sessions.length} conversas · ${agg.models.length} modelos`);
+    parts.push('');
+    state.sessions.forEach((session) => {
+      const lines = usageSessionTxtLines(session);
+      if (!lines) return;
+      parts.push('');
+      parts.push('#'.repeat(48));
+      parts.push(...lines);
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadTxtFile(`zeno-uso-geral-${stamp}.txt`, parts.join('\n'));
+  };
+
   const FILES_TREE = [
     ['oc-folder', 'packages', true, [
       ['oc-folder', 'ui', true, [
@@ -518,6 +646,7 @@
     })(),
     memoryConfigOpen: false,
     memoryLayoutPending: true,
+    backendPlugins: [],
     noteId: null,
     memoryEditor: null,
     chatsCollapsed: LS.get('oc-clone-chats-collapsed', false) === true,
@@ -534,7 +663,7 @@
     requireApproval: LS.get('oc-clone-require-approval', false),
   };
 
-  if (!['chat', 'memory'].includes(state.workspace)) state.workspace = 'chat';
+  if (!['chat', 'memory'].includes(state.workspace) && !(typeof state.workspace === 'string' && state.workspace.startsWith('tab:'))) state.workspace = 'chat';
   /* Normaliza shapes de builds antigas para os novos blocos de settings. */
   if (typeof state.settingsChat !== 'object' || !state.settingsChat) state.settingsChat = { fontSize: 'medium', enterBehavior: 'send', showSuggestions: true, compactMode: false };
   if (typeof state.settingsNotif !== 'object' || !state.settingsNotif) state.settingsNotif = { enabled: true, sound: true, mentionOnly: false, desktop: true };
@@ -916,6 +1045,10 @@
       LS.set('oc-clone-model', state.model);
     }
     try { applyModels(await ZenoBackend.models(false)); } catch {}
+    try {
+      const pd = await ZenoBackend.plugins();
+      state.backendPlugins = Array.isArray(pd?.plugins) ? pd.plugins : [];
+    } catch {}
     await refreshMemoryFromBackend();
     render();
   };
@@ -1167,15 +1300,37 @@
     const key = 'think_' + m.id;
     const streaming = !!m.streaming;
     const expanded = streaming || !!state.expandedTools[key];
+    /* Timeline na ordem real do run: pensamento → tool → texto → ...
+     * Mensagens antigas (sem timeline) caem no fallback agregado. */
+    const timeline = Array.isArray(m.timeline) && m.timeline.length
+      ? m.timeline
+      : (m.thinking || (m.tools && m.tools.length)) ? [
+        ...(m.thinking ? [{ type: 'thinking', id: m.id + '_th', text: m.thinking }] : []),
+        ...(m.tools || []).map((tool, index) => ({ type: 'tool', id: `${m.id}_t${index}`, tool: { ...tool, running: false } })),
+      ] : [];
     const tools = m.tools || [];
     const running = tools.filter((tool) => tool.running).length;
+    const hasText = (m.text || '').trim().length > 0;
     const parts = [];
     if (tools.length) parts.push(`${tools.length} ${tools.length === 1 ? 'ferramenta' : 'ferramentas'}`);
-    if (m.thinking) parts.push('raciocínio');
-    const summary = streaming && !tools.length && !m.thinking
+    const thinkingSteps = timeline.filter((segment) => segment.type === 'thinking').length;
+    if (thinkingSteps) parts.push(`${thinkingSteps} ${thinkingSteps === 1 ? 'pensamento' : 'pensamentos'}`);
+    if (hasText) parts.push('resposta');
+    const summary = streaming && !timeline.length
       ? 'Pensando…'
       : parts.join(' · ') || (streaming ? 'Trabalhando…' : 'Raciocínio');
-    const thinkingText = m.thinking || '';
+    const renderSegment = (segment) => {
+      if (segment.type === 'thinking') {
+        return segment.text ? `<div class="text-[13px] leading-relaxed text-muted-foreground" style="white-space: pre-wrap;">${renderMarkdown(segment.text)}</div>` : '';
+      }
+      if (segment.type === 'tool' && segment.tool) {
+        return `<div class="mt-1.5">${tplToolRow(segment.tool, segment.id, 'done')}</div>`;
+      }
+      if (segment.type === 'text' && segment.text.trim()) {
+        return `<div class="mt-1.5 text-[13.5px] leading-relaxed text-foreground" data-segment-text>${renderMarkdown(segment.text)}${streaming ? '<span class="tool-caret"></span>' : ''}</div>`;
+      }
+      return '';
+    };
     return `
     <div class="py-1">
       <div class="group/tool flex items-center gap-1.5 cursor-pointer" role="button" tabindex="0" data-tool-key="${key}">
@@ -1185,10 +1340,7 @@
         <span class="text-muted-foreground/60 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}">${icon('oc-arrow-right-s', 'remixicon h-3.5 w-3.5')}</span>
       </div>
       ${expanded ? `
-      <div class="mt-1.5 pl-0.5">
-        ${thinkingText ? `<div class="text-[13px] leading-relaxed text-muted-foreground" style="white-space: pre-wrap;">${renderMarkdown(thinkingText)}</div>` : ''}
-        ${tools.length ? `<div class="mt-1.5">${tools.map((tool, index) => tplToolRow(tool, `${m.id}_t${index}`, 'done')).join('')}</div>` : ''}
-      </div>` : ''}
+      <div class="mt-1.5 pl-0.5 space-y-2">${timeline.map(renderSegment).join('')}</div>` : ''}
     </div>`;
   };
 
@@ -1211,6 +1363,13 @@
       <span class="zeno-sidebar-nav-description">${description}</span>
     </button>`;
 
+  const sidebarDestinations = () => {
+    const pluginTabs = state.backendOk && Array.isArray(state.backendPlugins)
+      ? state.backendPlugins.filter((p) => p.enabled).flatMap((p) => (p.tabs || []).map((t) => ['tab:' + p.id, t.title || p.name || 'Plugin', 'oc-puzzle-2', 'Plugin']))
+      : [];
+    return [...SIDEBAR_DESTINATIONS, ...pluginTabs];
+  };
+
   const tplSidebarHeader = () => `
     <div class="zeno-sidebar-header select-none flex-shrink-0">
       <button type="button" data-action="new-session" class="zeno-new-chat-button ${state.workspace === 'chat' && state.draftNew ? 'is-active' : ''}">
@@ -1219,7 +1378,7 @@
         <kbd>Ctrl N</kbd>
       </button>
       <nav class="zeno-sidebar-nav" aria-label="Workspace navigation">
-        ${SIDEBAR_DESTINATIONS.map(tplSidebarDestination).join('')}
+        ${sidebarDestinations().map(tplSidebarDestination).join('')}
       </nav>
       <div class="zeno-project-tools">
         <span>My Projects</span>
@@ -1308,7 +1467,7 @@
     const base = Array.isArray(actions) && actions.every((item) => Array.isArray(item) && item.length >= 2)
       ? actions
       : CHIPS;
-    const pluginChips = activePluginButtons().map((b) => [b.icon || 'oc-puzzle-2', b.label || b.action || b.id]);
+    const pluginChips = activePluginButtons().map((b) => [b.icon || 'oc-puzzle-2', b.label || b.id || 'Plugin', b.action || b.label || '']);
     return [...base, ...pluginChips].slice(0, 18);
   };
 
@@ -1380,9 +1539,9 @@
           <div class="chat-input-column relative overflow-visible">
             <div class="contents">${chatInput()}
               <div class="flex flex-wrap items-center justify-center gap-1.5 chat-input-column mt-6" data-quick-actions-list>
-                ${getQuickActions().map(([i, t], index) => `
+                ${getQuickActions().map(([i, t, fill], index) => `
                 <div class="group/chip relative" draggable="true" data-quick-action data-quick-index="${index}" title="Arraste para mover · botão direito para editar">
-                  <button type="button" role="button" tabindex="0" class="group inline-flex touch-none select-none items-center gap-1 rounded-full border px-2 py-1 text-[10px] leading-4 text-muted-foreground transition-colors hover:text-foreground" data-chip="${esc(t)}">${icon(i, 'remixicon h-3 w-3')}<span class="whitespace-nowrap">${esc(t)}</span></button>
+                  <button type="button" role="button" tabindex="0" class="group inline-flex touch-none select-none items-center gap-1 rounded-full border px-2 py-1 text-[10px] leading-4 text-muted-foreground transition-colors hover:text-foreground" data-chip="${esc(fill || t)}">${icon(i, 'remixicon h-3 w-3')}<span class="whitespace-nowrap">${esc(t)}</span></button>
                 </div>`).join('')}
               </div>
             </div>
@@ -1556,7 +1715,7 @@
             ${editing ? `<input data-memory-title class="memory-editor-title" value="${esc(state.memoryEditor.title)}" aria-label="Note title">` : `<h2>${esc(note.title)}</h2>`}
           </div>
           <div class="memory-note-actions">
-            ${editing ? `<select data-memory-kind class="memory-editor-kind" aria-label="Tipo da memória">${['note', 'memory', 'mcp', 'skill'].map((k) => `<option value="${k}" ${kind === k ? 'selected' : ''}>${NOTE_KINDS[k]}${k === 'mcp' ? ' (JSON)' : k === 'skill' ? ' (MD)' : ''}</option>`).join('')}</select><button type="button" data-action="save-memory-note" class="memory-editor-save">Save</button><button type="button" data-action="discard-memory-note" class="memory-editor-discard">Discard</button>` : `<button type="button" data-action="edit-memory-note" class="memory-icon-button" title="Edit note" aria-label="Edit note">${icon('oc-edit', 'remixicon h-4 w-4')}</button>`}
+            ${editing ? `<select data-memory-kind class="memory-editor-kind" aria-label="Tipo da memória">${['note', 'mcp', 'skill'].map((k) => `<option value="${k}" ${kind === k ? 'selected' : ''}>${NOTE_KINDS[k]}${k === 'mcp' ? ' (JSON)' : k === 'skill' ? ' (MD)' : ''}</option>`).join('')}</select><button type="button" data-action="save-memory-note" class="memory-editor-save">Save</button><button type="button" data-action="discard-memory-note" class="memory-editor-discard">Discard</button>` : `<button type="button" data-action="edit-memory-note" class="memory-icon-button" title="Edit note" aria-label="Edit note">${icon('oc-edit', 'remixicon h-4 w-4')}</button>`}
             <button type="button" data-action="close-note" class="memory-icon-button" title="Close note" aria-label="Close note">${icon('oc-close', 'remixicon h-4 w-4')}</button>
           </div>
         </header>
@@ -1614,6 +1773,7 @@
         <div class="memory-config-row"><label class="memory-config-check"><input type="checkbox" data-memory-config-check="labels" ${cfg.labels ? 'checked' : ''}> Mostrar nomes nos nós</label></div>
         <div class="memory-config-hint">MCP = brilho alto · Skill = tom médio · MCP é formatado em JSON · Skill em Markdown · clique no nó para ver o nome</div>
         <button type="button" data-action="memory-relayout" class="zeno-mini-btn">Reorganizar rede</button>
+        <button type="button" data-action="memory-center" class="zeno-mini-btn">Centralizar visão</button>
       </div>` : ''}
     </div>`;
     return `<div class="memory-view" data-memory-view>
@@ -1637,8 +1797,38 @@
     </div>`;
   };
 
+  const tplPluginTab = (plugin) => {
+    const settings = Array.isArray(plugin.settings) ? plugin.settings : [];
+    const buttons = Array.isArray(plugin.buttons) ? plugin.buttons : [];
+    const tools = Array.isArray(plugin.tools) ? plugin.tools : [];
+    return `<div class="memory-view" data-plugin-tab>
+      <header class="memory-overlay-heading"><h1>${esc(plugin.name || 'Plugin')}</h1><p>${esc(plugin.description || 'Plugin do Zeno.')}</p></header>
+      <div class="mx-auto my-16 flex max-w-xl flex-col gap-5 px-6">
+        <section class="rounded-xl border border-border/70 bg-[var(--surface-elevated)] p-4">
+          <h2 class="typography-ui-label font-semibold text-foreground">Ferramentas de código</h2>
+          <div class="mt-2 space-y-1 text-xs text-muted-foreground">${tools.map((t) => `<div class="rounded-md border border-border/50 px-2 py-1"><b class="text-foreground">plugin_${esc(plugin.id)}_${esc(t.name)}</b><span class="block truncate">${esc(t.description || t.command || '')}</span></div>`).join('') || '<span>Nenhuma.</span>'}</div>
+        </section>
+        ${settings.length ? `
+        <section class="rounded-xl border border-border/70 bg-[var(--surface-elevated)] p-4">
+          <h2 class="typography-ui-label font-semibold text-foreground">Configurações do plugin</h2>
+          <div class="mt-2 space-y-2">${settings.map((s) => `<label class="flex items-center justify-between gap-3 text-xs text-muted-foreground"><span>${esc(s.label || s.key)}</span>${s.type === 'toggle' ? `<input type="checkbox" data-plugin-setting="${esc(s.key)}" ${String(s.value) === 'true' ? 'checked' : ''}>` : `<input class="h-7 w-48 rounded-md border border-border bg-transparent px-2 text-xs text-foreground" data-plugin-setting="${esc(s.key)}" value="${esc(String(s.value ?? ''))}">`}</label>`).join('')}</div>
+          <button type="button" data-action="plugin-settings-save" class="zeno-mini-btn mt-3">Salvar configurações</button>
+        </section>` : ''}
+        ${buttons.length ? `
+        <section class="rounded-xl border border-border/70 bg-[var(--surface-elevated)] p-4">
+          <h2 class="typography-ui-label font-semibold text-foreground">Botões</h2>
+          <div class="mt-2 flex flex-wrap gap-1.5">${buttons.map((b) => `<button type="button" data-chip="${esc(b.action || b.label)}" class="zeno-mini-btn">${esc(b.label || 'Ação')}</button>`).join('')}</div>
+        </section>` : ''}
+      </div>
+    </div>`;
+  };
+
   const tplWorkspace = () => {
     if (state.workspace === 'memory') return tplMemoryWorkspace();
+    if (typeof state.workspace === 'string' && state.workspace.startsWith('tab:')) {
+      const plugin = (state.backendPlugins || []).find((p) => p.id === state.workspace.slice(4));
+      if (plugin) return tplPluginTab(plugin);
+    }
     return '';
   };
 
@@ -1887,8 +2077,8 @@
     </div>`;
 
   const tplSettingsSelect = (label, value, options, dataMenu) => `
-    <div class="flex min-w-0 max-w-[24rem] items-center gap-2">
-      <button type="button" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" data-slot="select-trigger" data-size="settings" aria-label="${label}" data-select-menu="${dataMenu}" class="border-input flex items-center justify-between gap-2 rounded-md border bg-transparent typography-ui-label whitespace-nowrap shadow-none outline-none text-left focus-visible:outline-none h-8 min-h-8 px-3 w-full min-w-40 max-w-48">
+    <div class="flex min-w-0 max-w-[24rem] items-center">
+      <button type="button" tabindex="0" role="combobox" aria-expanded="false" aria-haspopup="listbox" data-slot="select-trigger" data-size="settings" aria-label="${label}" data-select-menu="${dataMenu}" class="zeno-select-trigger border-input flex items-center justify-between gap-2 rounded-md border bg-transparent typography-ui-label whitespace-nowrap shadow-none outline-none text-left focus-visible:outline-none h-8 min-h-8 pl-3 pr-9 w-full">
         <span data-slot="select-value">${esc(value)}</span>
         <span aria-hidden="true">${icon('oc-arrow-down-s', 'remixicon size-4 opacity-50')}</span>
       </button>
@@ -1908,7 +2098,7 @@
     </div>`;
 
   const tplNativeSelect = (attr, value, options) => `
-    <select ${attr} class="h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-2 text-sm text-foreground outline-none" style="background: var(--background);">
+    <select ${attr} class="zeno-native-select h-8 w-full max-w-[24rem] rounded-md border border-border bg-transparent px-3 text-sm text-foreground outline-none" style="background-color: var(--background);">
       ${options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}
     </select>`;
 
@@ -1938,10 +2128,6 @@
               ${tplSettingsField('Idioma', tplSettingsSelect('Select language', state.appLang === 'pt' ? 'Português' : state.appLang === 'es' ? 'Español' : 'English', [], 'lang'))}
               ${tplSettingsField('Formato de hora', tplSettingsSelect('Select time format', state.timeFormat === '12h' ? '12h' : state.timeFormat === '24h' ? '24h' : 'Auto', [], 'timefmt'))}
             </div>
-            <div class="grid max-w-[34rem] grid-cols-1 gap-4 @3xl:grid-cols-2">
-              ${tplSettingsField('Nome do app', tplSettingsInput('data-set-field="app.installName"', state.installAppName, 'text', 'OpenChamber'))}
-              ${tplSettingsField('Orientação de instalação', tplSettingsSelect('Select orientation', state.installOrientation === 'portrait' ? 'Portrait' : state.installOrientation === 'landscape' ? 'Landscape' : 'Follow system', [], 'orientation'))}
-            </div>
             <button type="button" class="inline-flex items-center justify-center gap-2 rounded-md border border-border px-3 h-8 text-sm text-foreground transition-colors" data-action="reload-themes">${icon('oc-refresh', 'remixicon h-3.5 w-3.5')}Recarregar temas</button>
           </div>
         </div>
@@ -1963,7 +2149,7 @@
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Notifications</h2>
         <p class="typography-meta mt-1 text-muted-foreground">Quando o Zeno deve chamar sua atenção.</p>
-        <div class="mt-9 max-w-[28rem] space-y-3.5">
+        <div class="mt-12 max-w-[28rem] space-y-5">
           ${tplToggleRow('Enable notifications', 'Avisar quando uma resposta terminar.', n.enabled, 'data-set-toggle="notif.enabled"')}
           ${tplToggleRow('Sound', 'Tocar um som junto do aviso.', n.sound, 'data-set-toggle="notif.sound"')}
           ${tplToggleRow('Mentions only', 'Só avisar quando a resposta pedir sua ação.', n.mentionOnly, 'data-set-toggle="notif.mentionOnly"')}
@@ -1984,7 +2170,7 @@
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Shortcuts</h2>
         <p class="typography-meta mt-1 text-muted-foreground">Clique no campo e digite a nova combinação.</p>
-        <div class="mt-9 max-w-[28rem] space-y-3.5">
+        <div class="mt-10 max-w-[28rem] space-y-4">
           ${row('New chat', 'newChat')}
           ${row('Command palette', 'palette')}
           ${row('Settings', 'settings')}
@@ -1999,7 +2185,7 @@
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Voice</h2>
         <p class="typography-meta mt-1 text-muted-foreground">Fala com o Zeno: Deepgram é o padrão, OpenAI é a opção.</p>
-        <div class="mt-8 max-w-[28rem] space-y-5">
+        <div class="mt-12 max-w-[28rem] space-y-6">
           ${tplSettingsField('Provider', tplNativeSelect('data-set-field="voice.provider"', state.voiceProvider, [['deepgram', 'Deepgram (padrão)'], ['openai', 'OpenAI']]))}
           ${tplSettingsField('Agent language', tplNativeSelect('data-set-field="voice.lang"', state.voiceLang, [['pt-BR', 'Português (BR)'], ['en-US', 'English (US)'], ['es-ES', 'Español']]))}
           ${tplSettingsField('Voice', tplNativeSelect('data-set-field="voice.name"', state.voiceName, [['aura-asteria-en', 'Aura Asteria (Deepgram)'], ['aura-luna-en', 'Aura Luna (Deepgram)'], ['aura-orion-en', 'Aura Orion (Deepgram)'], ['alloy', 'Alloy (OpenAI)'], ['echo', 'Echo (OpenAI)'], ['shimmer', 'Shimmer (OpenAI)']]))}
@@ -2031,7 +2217,7 @@
           ${tplSettingsField('Workspace do agente', tplSettingsInput('data-models-field="workspace"', backend.workspace || '.', 'text', '.'))}
           ${tplSettingsField('Modo do agente', tplNativeSelect('data-models-field="agent_mode"', state.agentMode, [['full', 'Full (todas as ferramentas)'], ['minimal', 'Minimal (4 ferramentas)']]))}
         </div>
-        <div class="mt-5 flex flex-wrap items-center gap-2">
+        <div class="mt-8 flex flex-wrap items-center gap-2">
           <button type="button" data-action="models-save" class="zeno-mini-btn">Salvar configuração</button>
           <button type="button" data-action="models-refresh" class="zeno-mini-btn" ${state.modelsLoading ? 'disabled' : ''}>${state.modelsLoading ? 'Buscando…' : 'Buscar modelos da API'}</button>
           <button type="button" data-action="models-test" class="zeno-mini-btn" ${state.modelsLoading ? 'disabled' : ''}>Testar conexão</button>
@@ -2113,7 +2299,7 @@
 
       const chartBody = chart === 'donut' ? donutSvg : chart === 'days' ? daysSvg : barsSvg;
       const sessionsList = agg.sessions.length ? agg.sessions.map((s) => `
-        <button type="button" data-usage-session="${esc(s.id)}" class="zeno-usage-row" title="Abrir conversa">
+        <div class="zeno-usage-row" data-usage-session="${esc(s.id)}" role="button" tabindex="0" title="Abrir conversa">
           <span class="min-w-0 flex-1 text-left">
             <span class="zeno-usage-row-title">${esc(s.title)}</span>
             <span class="zeno-usage-row-sub">${s.models.map((m) => esc(m)).join(' · ') || '—'}</span>
@@ -2122,28 +2308,31 @@
             <span class="zeno-usage-row-tokens">↑${fmtTokens(s.tokensIn)} ↓${fmtTokens(s.tokensOut)}</span>
             <span class="zeno-usage-row-cost">${fmtUSD(s.cost)}</span>
           </span>
-        </button>`).join('') : '<div class="zeno-usage-empty">Nenhum uso registrado ainda. Converse com o agente e os custos aparecem aqui.</div>';
+          <button type="button" class="zeno-usage-dl" data-usage-download="${esc(s.id)}" title="Baixar TXT completo desta conversa" aria-label="Baixar TXT">${icon('oc-download', 'remixicon h-3.5 w-3.5')}</button>
+        </div>`).join('') : '<div class="zeno-usage-empty">Nenhum uso registrado ainda. Converse com o agente e os custos aparecem aqui.</div>';
 
       return `
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Usage</h2>
         <p class="typography-meta mt-1 text-muted-foreground">Gasto por conversa e por modelo. Custo estimado pela tabela de preço por 1M tokens.</p>
-        <div class="mt-6 grid max-w-[34rem] grid-cols-2 gap-3 @3xl:grid-cols-4">
+        <div class="mt-8 grid max-w-[34rem] grid-cols-2 gap-3 @3xl:grid-cols-4">
           <div class="zeno-usage-card"><span class="zeno-usage-card-num">${fmtUSD(t.cost)}</span><span class="zeno-usage-card-label">gasto total</span></div>
           <div class="zeno-usage-card"><span class="zeno-usage-card-num">${fmtTokens(t.tokensIn + t.tokensOut)}</span><span class="zeno-usage-card-label">tokens</span></div>
           <div class="zeno-usage-card"><span class="zeno-usage-card-num">${agg.sessions.length}</span><span class="zeno-usage-card-label">conversas</span></div>
           <div class="zeno-usage-card"><span class="zeno-usage-card-num">${agg.models.length}</span><span class="zeno-usage-card-label">modelos</span></div>
         </div>
-        <div class="mt-7">
-          <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="mt-9">
+          <div class="flex items-center gap-4">
             <h3 class="typography-ui-label font-semibold text-foreground">Gráficos</h3>
-            ${tplSegGroup('Chart type', 'data-usage-chart', chart, [['bars', 'Barras', 'oc-bar-chart-2'], ['donut', 'Rosca', 'oc-donut-chart'], ['days', 'Dias', 'oc-pulse']])}
+            ${tplSegGroup('Chart type', 'data-usage-chart', chart, [['bars', 'Barras', 'oc-chart-bars'], ['donut', 'Rosca', 'oc-donut-chart'], ['days', 'Dias', 'oc-pulse']])}
           </div>
-          <div class="zeno-usage-chart mt-3">${chartBody || '<div class="zeno-usage-empty">Sem dados para o gráfico.</div>'}</div>
+          <div class="zeno-usage-chart mt-4">${chartBody || '<div class="zeno-usage-empty">Sem dados para o gráfico.</div>'}</div>
         </div>
-        <div class="mt-7">
-          <h3 class="typography-ui-label font-semibold text-foreground">Conversas</h3>
-          <div class="mt-3 max-w-[34rem] space-y-1.5">${sessionsList}</div>
+        <div class="mt-10">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="typography-ui-label font-semibold text-foreground">Conversas</h3>
+          </div>
+          <div class="mt-4 max-w-[34rem] space-y-1.5">${sessionsList}</div>
         </div>
       </div>`;
     }
@@ -2165,26 +2354,22 @@
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Projects</h2>
         <p class="typography-meta mt-1 text-muted-foreground">Renomeie pelo lápis; apague pelo lixeira (com confirmação).</p>
-        <div class="zeno-settings-grid mt-6">${blocks}</div>
+        <div class="zeno-settings-grid mt-9">${blocks}</div>
       </div>`;
     }
     if (sec === 'Remote Instances') {
       const cards = state.remotes.map((r) => `
-        <div class="zeno-setting-block" data-entity="${r.id}">
+        <div class="zeno-setting-block zeno-block-copyable" data-entity="${r.id}" data-remote-copy-block="${r.id}" role="button" tabindex="0" title="Clique para copiar o comando ssh">
           <div class="zeno-setting-block-head">
             <span class="zeno-block-name" title="${esc(r.name)}">${esc(r.name)}</span>
             <span class="zeno-block-actions">
               <button type="button" data-name-edit aria-label="Renomear" title="Renomear">${icon('oc-edit', 'remixicon h-3.5 w-3.5')}</button>
-              <button type="button" data-delete aria-label="Apagar" title="Apagar" class="is-danger">${icon('oc-delete-bin', 'remixicon h-3.5 w-3.5')}</button>
+              <button type="button" data-delete aria-label="Apagar" title="Apagar">${icon('oc-delete-bin', 'remixicon h-3.5 w-3.5')}</button>
             </span>
           </div>
           <div class="zeno-remote-target">${esc(r.type === 'colab' ? (r.url || 'colab') : `${r.user || 'root'}@${r.host}${r.port ? ':' + r.port : ''}`)}</div>
           <code class="zeno-remote-cmd">${esc(remoteConnectCmd(r))}</code>
-          <div class="zeno-setting-block-row">
-            ${r.password ? '<span class="zeno-setting-block-meta">senha configurada</span>' : ''}
-            <span class="flex-1"></span>
-            <button type="button" data-remote-copy="${r.id}" class="zeno-mini-btn">Copiar comando</button>
-          </div>
+          ${r.password ? '<div class="zeno-setting-block-row"><span class="zeno-setting-block-meta">senha configurada</span></div>' : ''}
         </div>`).join('');
       const addForm = `
         <form data-remote-ssh-form class="mt-3 max-w-[34rem] space-y-3">
@@ -2203,8 +2388,8 @@
       return `
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Remote Instances</h2>
-        <p class="typography-meta mt-1 text-muted-foreground">Servidores SSH para rodar o Zeno longe daqui.</p>
-        <div class="zeno-settings-grid mt-6">
+        <p class="typography-meta mt-1 text-muted-foreground">Servidores SSH para rodar o Zeno longe daqui. Clique no bloco para copiar o comando.</p>
+        <div class="zeno-settings-grid mt-9">
           ${cards}
           <div class="zeno-setting-block zeno-add-block" data-remote-add role="button" tabindex="0" aria-label="Adicionar instância SSH">
             ${icon('oc-add', 'remixicon h-4 w-4')}<span>Adicionar instância SSH</span>
@@ -2215,6 +2400,42 @@
       </div>`;
     }
     if (sec === 'Plugins') {
+      if (state.backendOk) {
+        const plugins = Array.isArray(state.backendPlugins) ? state.backendPlugins : [];
+        const cards = plugins.length ? plugins.map((p) => `
+        <div class="zeno-setting-block" data-entity="${esc(p.id)}">
+          <div class="zeno-setting-block-head">
+            <span class="zeno-block-name" title="${esc(p.name)}">${esc(p.name)}</span>
+            <span class="zeno-block-actions">
+              <button type="button" data-backend-plugin-toggle="${esc(p.id)}" aria-pressed="${p.enabled ? 'true' : 'false'}" class="zeno-toggle ${p.enabled ? 'is-on' : ''}" title="${p.enabled ? 'Desativar' : 'Ativar'}" aria-label="Ativar plugin"><span></span></button>
+              <button type="button" data-backend-plugin-delete="${esc(p.id)}" aria-label="Apagar" title="Apagar" class="is-danger">${icon('oc-delete-bin', 'remixicon h-3.5 w-3.5')}</button>
+            </span>
+          </div>
+          <p class="zeno-plugin-desc">${esc(p.description || 'Sem descrição.')}</p>
+          <div class="zeno-setting-block-row">
+            <span class="zeno-setting-block-meta">${(p.tools || []).length} tool${(p.tools || []).length === 1 ? '' : 's'} · ${(p.buttons || []).length} botão${(p.buttons || []).length === 1 ? '' : 'ões'} · ${(p.tabs || []).length} aba${(p.tabs || []).length === 1 ? '' : 's'}</span>
+            <span class="zeno-plugin-state ${p.enabled ? 'is-on' : ''}">${p.enabled ? 'Ativo' : 'Inativo'}</span>
+          </div>
+        </div>`).join('') : '<div class="zeno-blocks-empty">Peça ao agente no chat (\“crie um plugin…\”) — ele escreve .zeno/plugins.json — ou crie abaixo.</div>';
+        const field = (label, sel, placeholder) => `<label class="flex flex-col gap-1 text-xs text-muted-foreground"><span>${label}</span><input data-plugin-new="${sel}" placeholder="${placeholder}" class="h-8 rounded-md border border-border bg-transparent px-2 text-xs text-foreground"></label>`;
+        const createForm = `
+        <div class="zeno-setting-block mt-2" data-plugin-create-form>
+          <div class="zeno-setting-block-head"><span class="zeno-block-name">Novo plugin (backend em C)</span></div>
+          <div class="mt-2 grid grid-cols-2 gap-2">${field('Nome', 'name', 'Meu plugin')}${field('Descrição', 'description', 'O que faz')}</div>
+          <div class="mt-3 grid grid-cols-2 gap-2">${field('Tool: nome', 'tool_name', 'nome_tool')}${field('Tool: descrição', 'tool_desc', 'O que a tool faz')}</div>
+          <div class="mt-2">${field('Tool: comando (use {{var}})', 'command', 'node script.js {{input}}')}</div>
+          <div class="mt-3 grid grid-cols-2 gap-2">${field('Botão: rótulo', 'button_label', 'Rodar')}${field('Botão: ação (prompt)', 'button_action', 'Use plugin_… para…')}</div>
+          <div class="mt-3">${field('Aba: título', 'tab_title', 'Minha aba')}</div>
+          <button type="button" data-backend-plugin-create class="zeno-mini-btn mt-3">Criar plugin</button>
+        </div>`;
+        return `
+        <div class="px-6 py-5">
+          <h2 class="typography-h3 text-foreground">Plugins</h2>
+          <p class="typography-meta mt-1 text-muted-foreground">Plugins modificam o Zeno: ferramentas de código (shell), botões no chat, abas na sidebar e campos nas configurações. Persistidos em .zeno/plugins.json, backend em C.</p>
+          <div class="zeno-settings-grid mt-9">${cards}</div>
+          ${createForm}
+        </div>`;
+      }
       const cards = state.plugins.length ? state.plugins.map((p) => `
         <div class="zeno-setting-block" data-entity="${p.id}">
           <div class="zeno-setting-block-head">
@@ -2236,7 +2457,7 @@
       <div class="px-6 py-5">
         <h2 class="typography-h3 text-foreground">Plugins</h2>
         <p class="typography-meta mt-1 text-muted-foreground">Ative pelo interruptor, renomeie pelo lápis. Aplicados: ${active.length}.</p>
-        <div class="zeno-settings-grid mt-6">${cards}</div>
+        <div class="zeno-settings-grid mt-9">${cards}</div>
       </div>`;
     }
     return `
@@ -2347,11 +2568,17 @@
     const chat = $('#chat-root');
     if (chat) {
       const scroller = $('[data-scrollbar="chat"]', chat);
+      const prevTop = scroller ? scroller.scrollTop : 0;
       const atBottom = !scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60;
       chat.innerHTML = tplChat();
       bindChat(chat);
       bindComposer(chat);
-      if (atBottom && scroller) scroller.scrollTop = scroller.scrollHeight;
+      /* Restaura a posição do usuário; só acompanha o fim quando streaming. */
+      const fresh = $('[data-scrollbar="chat"]', chat);
+      if (fresh) {
+        if (atBottom && state.liveRun) fresh.scrollTop = fresh.scrollHeight;
+        else if (!atBottom) fresh.scrollTop = prevTop;
+      }
     }
     const sb = $('[data-sidebar-root]');
     if (sb) { sb.innerHTML = tplSidebar(); bindSidebar(sb); }
@@ -2368,8 +2595,6 @@
     }
     const actionModal = $('[data-action-modal-root]');
     if (actionModal) { actionModal.innerHTML = tplActionModal(); if (state.modal) bindActionModal(actionModal); }
-    const chat2 = $('#chat-root');
-    if (chat2) { const sc = $('[data-scrollbar="chat"]', chat2); if (sc) sc.scrollTop = sc.scrollHeight; }
   };
 
   const captureMemoryNote = () => {
@@ -2418,12 +2643,18 @@
     const viewport = $('[data-memory-viewport]', rootEl);
     const canvas = $('[data-memory-canvas]', rootEl);
     if (viewport && canvas) {
-      let scale = Math.min(1, viewport.clientWidth / 1700, viewport.clientHeight / 960);
-      let x = (viewport.clientWidth - 1600 * scale) / 2;
-      let y = (viewport.clientHeight - 900 * scale) / 2;
+      /* Câmera persistente: re-render (ex.: ligar memórias) NÃO reseta zoom/posição. */
+      if (!state.memoryCam || typeof state.memoryCam.scale !== 'number') {
+        const scale = Math.min(1, viewport.clientWidth / 1700, viewport.clientHeight / 960);
+        state.memoryCam = { scale, x: (viewport.clientWidth - 1600 * scale) / 2, y: (viewport.clientHeight - 900 * scale) / 2 };
+      }
+      let scale = state.memoryCam.scale;
+      let x = state.memoryCam.x;
+      let y = state.memoryCam.y;
       let dragging = false, draggedNode = null, startX = 0, startY = 0;
       let connectingFrom = null, connectionLine = null;
-      const transform = () => { canvas.style.transform = `translate(${x}px, ${y}px) scale(${scale})`; };
+      const saveCam = () => { state.memoryCam = { scale, x, y }; };
+      const transform = () => { canvas.style.transform = `translate(${x}px, ${y}px) scale(${scale})`; saveCam(); };
       const nodePoint = (event) => {
         const rect = viewport.getBoundingClientRect();
         return { x: (event.clientX - rect.left - x) / scale, y: (event.clientY - rect.top - y) / scale };
@@ -2602,6 +2833,11 @@
       state.memoryLayoutPending = true;
       state.memoryConfigOpen = false;
       LS.set('oc-clone-memory-notes', state.memoryNotes);
+      render();
+    });
+    $('[data-action="memory-center"]', rootEl)?.addEventListener('click', () => {
+      state.memoryCam = null;
+      state.memoryConfigOpen = false;
       render();
     });
     /* Troca de tipo do editor (MCP = JSON, Skill = Markdown) */
@@ -3364,7 +3600,12 @@
     host.textContent = state.plugins.filter((p) => p.enabled && p.ui?.css).map((p) => `/* ${p.id} */\n${p.ui.css}`).join('\n');
   };
 
-  const activePluginButtons = () => state.plugins.filter((p) => p.enabled).flatMap((p) => p.buttons || []).slice(0, 12);
+  const activePluginButtons = () => {
+    const source = state.backendOk && Array.isArray(state.backendPlugins)
+      ? state.backendPlugins.filter((p) => p.enabled)
+      : state.plugins.filter((p) => p.enabled);
+    return source.flatMap((p) => p.buttons || []).slice(0, 12);
+  };
 
   const remoteAdd = (type, name, target) => {
     const t = String(type || '').toLowerCase();
@@ -3707,8 +3948,22 @@
     };
   })();
 
+  /* Timeline: segmentos na ordem real do run — thinking → tool → text → ...
+   * Cada segmento novo abre um bloco; repetição do mesmo tipo cria novo passo. */
+  const timelineAdd = (live, type, extra) => {
+    const last = live.timeline[live.timeline.length - 1];
+    if (last && last.type === type) {
+      if (extra && extra.text) last.text = last.text ? `${last.text}\n${extra.text}` : extra.text;
+      return last;
+    }
+    const segment = { type, id: 'seg_' + uid(), text: '', ...extra };
+    live.timeline.push(segment);
+    return segment;
+  };
+
   const applyRunEvent = (live, event) => {
     if (!event || !event.type) return;
+    live.timeline = live.timeline || [];
     if (event.type === 'run_started') {
       live.runId = event.run_id || live.runId;
       if (event.model) live.model = event.model;
@@ -3716,15 +3971,17 @@
     }
     if (event.type === 'thinking') {
       const text = String(event.text || '').trim();
-      if (text) live.thinking = live.thinking ? `${live.thinking}\n${text}` : text;
+      if (text) timelineAdd(live, 'thinking', { text });
       return;
     }
     if (event.type === 'tool_started') {
-      live.tools.push({
+      const tool = {
         id: 'tool_' + uid(), name: event.tool || 'tool', title: prettyTool(event.tool),
         cmd: toolArgsSummary(event.args), args: event.args, output: [], ok: null,
         running: true, startedAt: Date.now(), duration: '',
-      });
+      };
+      live.tools.push(tool);
+      timelineAdd(live, 'tool', { tool });
       return;
     }
     if (event.type === 'tool_completed') {
@@ -3736,14 +3993,20 @@
       if (!tool) {
         tool = { id: 'tool_' + uid(), name, title: prettyTool(name), cmd: '', args: null, output: [], ok: null, running: true, startedAt: Date.now(), duration: '' };
         live.tools.push(tool);
+        timelineAdd(live, 'tool', { tool });
       }
       tool.running = false;
       tool.ok = event.ok !== false;
       tool.duration = toolDurations(tool);
       tool.output = toolOutputLines(event.output);
+      for (let index = live.timeline.length - 1; index >= 0; index--) {
+        const segment = live.timeline[index];
+        if (segment.type === 'tool' && segment.tool && segment.tool.id === tool.id) { segment.tool = { ...tool }; break; }
+      }
       return;
     }
     if (event.type === 'text') {
+      timelineAdd(live, 'text', { text: String(event.delta || '') });
       live.text += String(event.delta || '');
       return;
     }
@@ -3785,10 +4048,13 @@
     session.messages.push({
       id: live.id, role: 'assistant', time: fmtTime(now()), model: live.model, agent: live.agent,
       thinking: live.thinking,
+      timeline: live.timeline.filter((segment) => (segment.type !== 'text' || segment.text.trim()) && (segment.type !== 'tool' || segment.tool)),
       tools: live.tools.map((tool) => ({ title: tool.title, cmd: tool.cmd, output: tool.output, duration: tool.duration, ok: tool.ok })),
       text: live.text, error: live.error || '', duration: live.duration, createdAt: new Date().toISOString(),
       tokensIn: live.tokensIn, tokensOut: live.tokensOut, status: live.status,
     });
+    /* Sugestão de follow-up gerada do contexto da conversa. */
+    session.messages[session.messages.length - 1].suggestion = deriveSuggestion(session);
     state.liveRun = null;
     state.typing = false;
     LS.set('oc-clone-sessions', state.sessions);
@@ -3810,7 +4076,7 @@
     const live = {
       id: 'msg_' + uid(), role: 'assistant', time: fmtTime(now()), model: state.model,
       agent: state.agentMode === 'minimal' ? 'plan' : 'build',
-      thinking: '', tools: [], text: '', error: '', streaming: true,
+      thinking: '', tools: [], timeline: [], text: '', error: '', streaming: true,
       startedAt: Date.now(), duration: '', runId: '',
     };
     state.expandedTools['think_' + live.id] = true;
@@ -3995,11 +4261,13 @@
       const bars = 56;
       const freq = runtime.freq || null;
       const mid = H / 2;
+      const pad = 20; /* afasta os tracinhos das bordas da caixa */
+      const usable = W - pad * 2;
       for (let i = 0; i < bars; i++) {
         let v = level;
         if (freq) v = Math.min(1, (freq[Math.floor((i / bars) * freq.length)] / 255) * 1.4 + level * 0.25);
         const h = Math.max(3, v * (H * 0.86));
-        const x = (i / bars) * W + (W / bars - 3) / 2;
+        const x = pad + (i / bars) * usable + (usable / bars - 3) / 2;
         const grad = ctx.createLinearGradient(0, mid - h / 2, 0, mid + h / 2);
         grad.addColorStop(0, '#8ab6ff');
         grad.addColorStop(1, '#c9a6ff');
@@ -4660,7 +4928,8 @@
       refreshSettingsContent(rootEl);
     }));
     /* Clicar numa conversa do Usage abre ela no workspace. */
-    $$('[data-usage-session]', rootEl).forEach((b) => b.addEventListener('click', () => {
+    $$('[data-usage-session]', rootEl).forEach((b) => b.addEventListener('click', (e) => {
+      if (e.target.closest('[data-usage-download]')) return;
       const id = b.dataset.usageSession;
       if (!state.sessions.some((s) => s.id === id)) return;
       state.activeId = id;
@@ -4671,6 +4940,22 @@
       persistWorkspace();
       render();
     }));
+    $$('[data-usage-session]', rootEl).forEach((b) => b.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.target.closest('[data-usage-download]')) return;
+      e.preventDefault();
+      b.click();
+    }));
+    /* Download do TXT com todos os gastos da conversa (pensamento, tools, entradas e saídas). */
+    $$('[data-usage-download]', rootEl).forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      usageDownloadSession(b.dataset.usageDownload);
+      flashSettingsNote(rootEl, 'TXT da conversa baixado.');
+    }));
+    $('[data-usage-download-all]', rootEl)?.addEventListener('click', () => {
+      usageDownloadAll();
+      flashSettingsNote(rootEl, 'TXT com todas as conversas baixado.');
+    });
     /* Appearance/Chat: recarregar temas. */
     $('[data-action="reload-themes"]', rootEl)?.addEventListener('click', () => { applyTheme(); refreshSettingsContent(rootEl); render(); });
     /* Integração ZenoC: aba Models */
@@ -4873,9 +5158,10 @@
       toggleRemoteForm(false);
       render();
     });
-    /* Copiar comando ssh do bloco */
-    $$('[data-remote-copy]', rootEl).forEach((b) => b.addEventListener('click', async () => {
-      const remote = state.remotes.find((r) => r.id === b.dataset.remoteCopy);
+    /* Clique no bloco de instância copia o comando ssh automaticamente. */
+    $$('[data-remote-copy-block]', rootEl).forEach((block) => block.addEventListener('click', async (e) => {
+      if (e.target.closest('button')) return; /* lápis e lixeira têm seus próprios handlers */
+      const remote = state.remotes.find((r) => r.id === block.dataset.remoteCopyBlock);
       if (!remote) return;
       try { await navigator.clipboard.writeText(remoteConnectCmd(remote)); flashSettingsNote(rootEl, 'Comando copiado.'); }
       catch { flashSettingsNote(rootEl, remoteConnectCmd(remote)); }
@@ -4890,6 +5176,62 @@
       refreshSettingsContent(rootEl);
       render();
     }));
+    /* Plugins backend (C): toggle/delete/criar */
+    $$('[data-backend-plugin-toggle]', rootEl).forEach((b) => b.addEventListener('click', async () => {
+      const id = b.dataset.backendPluginToggle;
+      try {
+        await ZenoBackend.togglePlugin(id, b.getAttribute('aria-pressed') !== 'true');
+        const pd = await ZenoBackend.plugins();
+        state.backendPlugins = Array.isArray(pd?.plugins) ? pd.plugins : [];
+        refreshSettingsContent(rootEl);
+        render();
+      } catch (error) { flashSettingsNote(rootEl, `Falha: ${error.message}`); }
+    }));
+    $$('[data-backend-plugin-delete]', rootEl).forEach((b) => b.addEventListener('click', async () => {
+      const id = b.dataset.backendPluginDelete;
+      if (!window.confirm('Apagar plugin?')) return;
+      try {
+        await ZenoBackend.deletePlugin(id);
+        const pd = await ZenoBackend.plugins();
+        state.backendPlugins = Array.isArray(pd?.plugins) ? pd.plugins : [];
+        refreshSettingsContent(rootEl);
+        render();
+      } catch (error) { flashSettingsNote(rootEl, `Falha: ${error.message}`); }
+    }));
+    $('[data-backend-plugin-create]', rootEl)?.addEventListener('click', async () => {
+      const val = (sel) => ($(`[data-plugin-new="${sel}"]`, rootEl)?.value || '').trim();
+      const plugin = {
+        name: val('name') || 'Novo plugin',
+        description: val('description'),
+        enabled: true,
+      };
+      if (val('tool_name') && val('command')) plugin.tools = [{ name: val('tool_name'), description: val('tool_desc'), command: val('command') }];
+      if (val('button_label')) plugin.buttons = [{ label: val('button_label'), action: val('button_action') || val('button_label') }];
+      if (val('tab_title')) plugin.tabs = [{ title: val('tab_title') }];
+      try {
+        await ZenoBackend.savePlugin(plugin);
+        const pd = await ZenoBackend.plugins();
+        state.backendPlugins = Array.isArray(pd?.plugins) ? pd.plugins : [];
+        flashSettingsNote(rootEl, 'Plugin criado e ativo.');
+        refreshSettingsContent(rootEl);
+        render();
+      } catch (error) { flashSettingsNote(rootEl, `Falha ao criar: ${error.message}`); }
+    });
+    $('[data-action="plugin-settings-save"]', rootEl)?.addEventListener('click', async () => {
+      const panel = rootEl.querySelector('[data-plugin-tab]');
+      if (!panel) return;
+      const plugin = (state.backendPlugins || []).find((p) => 'tab:' + p.id === state.workspace);
+      if (!plugin) return;
+      $$('[data-plugin-setting]', panel).forEach((input) => {
+        const key = input.dataset.pluginSetting;
+        const setting = (plugin.settings || []).find((s) => s.key === key);
+        if (setting) setting.value = input.type === 'checkbox' ? String(input.checked) : input.value;
+      });
+      try {
+        await ZenoBackend.savePlugin(plugin);
+        flashSettingsNote(panel, 'Configurações salvas.');
+      } catch (error) { flashSettingsNote(panel, `Falha: ${error.message}`); }
+    });
   };
 
   const flashSettingsNote = (rootEl, text) => {

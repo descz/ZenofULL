@@ -430,6 +430,368 @@ static int bridge_register_memory_link_tool(ZenoRegistry *registry, char **error
     return 1;
 }
 
+/* ================= plugins (modificador do Zeno, backend em C) ============ */
+/* Um plugin pode: registrar ferramentas de código no agente (templates de */
+/* comando shell com placeholders {{var}}), criar botões que injetam prompts */
+/* na UI, criar abas na sidebar e campos custom nas configurações. */
+typedef struct PluginToolContext {
+    ZenoSandbox *sandbox;
+    char *workspace;
+    char *command;
+} PluginToolContext;
+
+static char *bridge_plugins_path(void) {
+    char *dir = bridge_join(g_bridge.cfg.workspace, ".zeno");
+    if (dir == NULL) return NULL;
+    (void)zeno_mkdirs(dir);
+    char *path = bridge_join(dir, "plugins.json");
+    free(dir);
+    return path;
+}
+
+static char *bridge_plugins_read_raw(void) {
+    const char *fallback = "{\"plugins\":[]}";
+    char *path = bridge_plugins_path();
+    if (path == NULL) return zeno_strdup(fallback);
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) { free(path); return zeno_strdup(fallback); }
+    char *buffer = (char *)malloc(1024 * 1024);
+    size_t read = 0;
+    if (buffer != NULL) read = fread(buffer, 1, 1024 * 1024 - 1, file);
+    fclose(file);
+    if (buffer == NULL) { free(path); return zeno_strdup(fallback); }
+    buffer[read] = 0;
+    free(path);
+    return buffer;
+}
+
+static int bridge_plugins_write_raw(const char *json) {
+    char *path = bridge_plugins_path();
+    if (path == NULL || json == NULL) { free(path); return 0; }
+    FILE *file = fopen(path, "wb");
+    if (file == NULL) { free(path); return 0; }
+    size_t written = fwrite(json, 1, strlen(json), file);
+    fclose(file);
+    free(path);
+    return written == strlen(json);
+}
+
+/* Expande {{placeholders}} do template com os valores de args_json; */
+/* placeholder sem valor vira string vazia. */
+static char *bridge_replace_all(const char *text, const char *needle, const char *replacement) {
+    if (text == NULL || needle == NULL || replacement == NULL) return NULL;
+    size_t needle_len = strlen(needle);
+    size_t repl_len = strlen(replacement);
+    size_t count = 0;
+    const char *cursor = text;
+    while ((cursor = strstr(cursor, needle)) != NULL) { count++; cursor += needle_len; }
+    if (count == 0) return zeno_strdup(text);
+    size_t text_len = strlen(text);
+    char *result = (char *)malloc(text_len + count * (repl_len > needle_len ? repl_len - needle_len : 0) + 16);
+    size_t at = 0;
+    cursor = text;
+    while (*cursor != 0) {
+        if (needle_len > 0 && strncmp(cursor, needle, needle_len) == 0) {
+            memcpy(result + at, replacement, repl_len); at += repl_len; cursor += needle_len;
+        } else {
+            result[at++] = *cursor++;
+        }
+    }
+    result[at] = 0;
+    return result;
+}
+
+static char *bridge_plugin_expand(const char *tpl, const char *args_json) {
+    char *result = zeno_strdup(tpl != NULL ? tpl : "");
+    for (int pass = 0; pass < 64; pass++) {
+        const char *open = strstr(result, "{{");
+        if (open == NULL) break;
+        const char *close = strstr(open, "}}");
+        if (close == NULL) break;
+        size_t length = (size_t)(close - open - 2);
+        char *key = zeno_strndup(open + 2, length);
+        char *name = key != NULL ? zeno_trim_copy(key) : NULL;
+        free(key);
+        char *value = name != NULL && *name != 0 ? zeno_json_get_path_string(args_json, name) : NULL;
+        char *safe = value != NULL ? zeno_strdup(value) : zeno_strdup("");
+        free(value);
+        char *next = zeno_format("%.*s%s%s", (int)(open - result), result, safe, close + 2);
+        free(result); free(name); free(safe); result = next;
+    }
+    return result;
+}
+static int bridge_plugin_tool_handler(void *context, const char *args, char **output, char **error) {
+    PluginToolContext *ctx = (PluginToolContext *)context;
+    if (ctx == NULL || ctx->sandbox == NULL) {
+        if (error != NULL) *error = zeno_strdup("Plugin tool sem sandbox.");
+        return 0;
+    }
+    char *command = bridge_plugin_expand(ctx->command, args);
+    ZenoExecResult result;
+    memset(&result, 0, sizeof(result));
+    result = zeno_sandbox_execute(ctx->sandbox, command != NULL ? command : "", ctx->workspace, 120000);
+    int ok = result.ok;
+    *output = ok ? zeno_strdup(result.output) : zeno_format("%s%s", result.blocked ? "SANDBOX BLOCKED: " : "Error: ", result.reason != NULL ? result.reason : "plugin command failed");
+    if (!ok && error != NULL) *error = zeno_strdup(result.reason != NULL ? result.reason : "plugin command failed");
+    zeno_exec_result_free(&result);
+    free(command);
+    return *output != NULL && ok;
+}
+
+/* Schema derivado dos placeholders únicos do template. */
+static char *bridge_plugin_schema(const char *tpl) {
+    char *schema = zeno_strdup("{\"type\":\"object\",\"properties\":{}}");
+    const char *cursor = tpl != NULL ? tpl : "";
+    while ((cursor = strstr(cursor, "{{")) != NULL) {
+        const char *end = strstr(cursor, "}}");
+        if (end == NULL) break;
+        size_t length = (size_t)(end - cursor - 2);
+        char *key = zeno_strndup(cursor + 2, length);
+        char *name = key != NULL ? zeno_trim_copy(key) : NULL;
+        free(key);
+        if (name != NULL && *name != 0 && strstr(schema, name) == NULL) {
+            char *prop = zeno_format("\"%s\":{\"type\":\"string\"}", name);
+            char *before = strstr(schema, "\"properties\":{");
+            if (before != NULL) {
+                size_t head = (size_t)(before - schema) + strlen("\"properties\":{");
+                char *merged = zeno_format("%.*s%s%s", (int)head, schema, prop, schema + head);
+                free(schema); schema = merged;
+            }
+            free(prop);
+        }
+        free(name);
+        cursor = end;
+    }
+    return schema;
+}
+
+/* Remove todas as ferramentas plugin_* do registry. */
+static void bridge_unregister_plugin_tools(ZenoRegistry *registry) {
+    char *list = zeno_registry_list_json(registry);
+    char *parse_error = NULL;
+    ZjNode *root = zj_parse(list != NULL ? list : "[]", &parse_error);
+    free(parse_error); free(list);
+    if (root != NULL && root->type == ZJ_ARRAY) {
+        for (size_t index = 0; index < root->count; index++) {
+            ZjNode *item = zj_array_get(root, index);
+            const char *name = zj_string(zj_object_get(item, "name"));
+            if (name != NULL && strncmp(name, "plugin_", 7) == 0) zeno_registry_unregister(registry, name);
+        }
+    }
+    zj_free(root);
+}
+
+/* Registra as tools dos plugins habilitados; chamar após builtins. */
+static void bridge_register_plugin_tools(ZenoRegistry *registry, ZenoSandbox *sandbox) {
+    bridge_unregister_plugin_tools(registry);
+    char *json = bridge_plugins_read_raw();
+    char *parse_error = NULL;
+    ZjNode *root = zj_parse(json != NULL ? json : "{}", &parse_error);
+    free(parse_error); free(json);
+    ZjNode *plugins = root != NULL && root->type == ZJ_OBJECT ? zj_object_get(root, "plugins") : NULL;
+    if (plugins == NULL || plugins->type != ZJ_ARRAY) { zj_free(root); return; }
+    for (size_t index = 0; index < plugins->count; index++) {
+        ZjNode *plugin = zj_array_get(plugins, index);
+        const char *id = zj_string(zj_object_get(plugin, "id"));
+        int enabled = zj_bool(zj_object_get(plugin, "enabled"), 0);
+        if (id == NULL || *id == 0 || !enabled) continue;
+        ZjNode *tools = zj_object_get(plugin, "tools");
+        if (tools == NULL || tools->type != ZJ_ARRAY) continue;
+        for (size_t t = 0; t < tools->count; t++) {
+            ZjNode *tool = zj_array_get(tools, t);
+            const char *name = zj_string(zj_object_get(tool, "name"));
+            const char *description = zj_string(zj_object_get(tool, "description"));
+            const char *command = zj_string(zj_object_get(tool, "command"));
+            if (name == NULL || *name == 0 || command == NULL || *command == 0) continue;
+            char *tool_name = zeno_format("plugin_%s_%s", id, name);
+            for (char *c = tool_name; *c != 0; c++) {
+                if (!((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '_')) *c = '_';
+            }
+            char *schema = bridge_plugin_schema(command);
+            ZenoToolDefinition definition;
+            memset(&definition, 0, sizeof(definition));
+            definition.name = tool_name;
+            definition.description = description != NULL && *description != 0 ? description : "Plugin code tool (shell command template).";
+            definition.parameters_json = schema;
+            definition.effect = ZENO_EFFECT_WRITE_EXTERNAL;
+            definition.requires_approval = 0;
+            definition.timeout_ms = 120000;
+            definition.max_retries = 0;
+            PluginToolContext *ctx = (PluginToolContext *)calloc(1, sizeof(PluginToolContext));
+            if (ctx != NULL) {
+                ctx->sandbox = sandbox;
+                ctx->workspace = zeno_strdup(g_bridge.cfg.workspace);
+                ctx->command = zeno_strdup(command);
+                (void)zeno_registry_register(registry, definition, bridge_plugin_tool_handler, ctx);
+            }
+            free(tool_name); free(schema);
+        }
+    }
+    zj_free(root);
+}
+
+/* Troca o literal true/false do campo "enabled" no JSON do plugin. */
+static char *bridge_plugin_toggle_flag(const char *plugin_json, int enabled) {
+    const char *key = strstr(plugin_json, "\"enabled\"");
+    if (key == NULL) return NULL;
+    const char *colon = strchr(key, ':');
+    if (colon == NULL) return NULL;
+    const char *cursor = colon + 1;
+    while (*cursor == ' ' || *cursor == '\t') cursor++;
+    const char *token = cursor;
+    const char *false_hit = strstr(token, "false");
+    const char *true_hit = strstr(token, "true");
+    const char *hit = NULL;
+    size_t token_len = 0;
+    if (true_hit != NULL && (false_hit == NULL || true_hit < false_hit)) { hit = true_hit; token_len = 4; }
+    else if (false_hit != NULL) { hit = false_hit; token_len = 5; }
+    if (hit == NULL) return NULL;
+    char *replacement = enabled ? "true" : "false";
+    return zeno_format("%.*s%s%s", (int)(hit - plugin_json), plugin_json, replacement, hit + token_len);
+}
+
+/* Reconstrói o store aplicando uma operação: */
+/* op 0 = apenas leitura; 1 = upsert (upsert_id + upsert_json); */
+/* 2 = delete (upsert_id usado como id alvo); 3 = toggle. */
+static char *bridge_plugins_store_maintain(int op, const char *upsert_id, const char *upsert_json, int toggle_enabled, char **error) {
+    const char *delete_id = op == 2 ? upsert_id : NULL;
+    const char *toggle_id = op == 3 ? upsert_id : NULL;
+    char *store_raw = bridge_plugins_read_raw();
+    char *parse_error = NULL;
+    ZjNode *store = zj_parse(store_raw != NULL ? store_raw : "{}", &parse_error);
+    free(parse_error); free(store_raw);
+    ZjNode *plugins = store != NULL && store->type == ZJ_OBJECT ? zj_object_get(store, "plugins") : NULL;
+    char *array = zeno_strdup("[");
+    int found = 0;
+    if (plugins != NULL && plugins->type == ZJ_ARRAY) {
+        for (size_t index = 0; index < plugins->count; index++) {
+            ZjNode *plugin = zj_array_get(plugins, index);
+            const char *pid = zj_string(zj_object_get(plugin, "id"));
+            if (delete_id != NULL && pid != NULL && strcmp(pid, delete_id) == 0) { found = 1; continue; }
+            if (op == 1 && upsert_id != NULL && pid != NULL && strcmp(pid, upsert_id) == 0) { found = 1; continue; }
+            if (op == 3 && toggle_id != NULL && pid != NULL && strcmp(pid, toggle_id) == 0) {
+                found = 1;
+                char *plugin_json = zj_stringify_compact(plugin);
+                char *patched = plugin_json != NULL ? bridge_plugin_toggle_flag(plugin_json, toggle_enabled) : NULL;
+                free(plugin_json);
+                if (patched == NULL) { free(array); zj_free(store); if (error != NULL) *error = zeno_strdup("Plugin não encontrado ou sem campo enabled."); return NULL; }
+                char *grown = patched != NULL ? zeno_json_array_append(array, patched) : NULL;
+                free(patched);
+                if (grown != NULL) { free(array); array = grown; }
+                continue;
+            }
+            char *plugin_json = zj_stringify_compact(plugin);
+            char *grown = plugin_json != NULL ? zeno_json_array_append(array, plugin_json) : NULL;
+            free(plugin_json);
+            if (grown != NULL) { free(array); array = grown; }
+        }
+    }
+    zj_free(store);
+    if (op == 1 && upsert_json != NULL && *upsert_json != 0) {
+        char *grown = zeno_json_array_append(array, upsert_json);
+        if (grown != NULL) { free(array); array = grown; }
+        found = 1;
+    }
+    if ((op == 2 || op == 3) && !found) {
+        free(array);
+        if (error != NULL) *error = zeno_strdup("Plugin não encontrado.");
+        return NULL;
+    }
+    return zeno_format("{\"plugins\":%s}", array);
+}
+
+char *zeno_bridge_plugins_json(void) {
+    zeno_bridge_init(NULL);
+    zeno_mutex_lock(&g_bridge.lock);
+    char *json = bridge_plugins_read_raw();
+    zeno_mutex_unlock(&g_bridge.lock);
+    char *parse_error = NULL;
+    ZjNode *root = zj_parse(json != NULL ? json : "{}", &parse_error);
+    free(parse_error); free(json);
+    if (root != NULL && root->type == ZJ_OBJECT && zj_object_get(root, "plugins") == NULL) { zj_free(root); return zeno_strdup("{}"); }
+    char *serialized = root != NULL ? zj_stringify_compact(root) : NULL;
+    zj_free(root);
+    return serialized != NULL ? serialized : zeno_strdup("{}");
+}
+
+/* Salva (upsert) um plugin e re-registra as tools. */
+/* Retorna {"ok":true,"id":"..."} ou NULL com *error. */
+char *zeno_bridge_plugins_save(const char *json, char **error) {
+    if (error != NULL) *error = NULL;
+    zeno_bridge_init(NULL);
+    if (json == NULL || *json == 0) {
+        if (error != NULL) *error = zeno_strdup("JSON vazio.");
+        return NULL;
+    }
+    char *parse_error = NULL;
+    ZjNode *incoming = zj_parse(json, &parse_error);
+    free(parse_error);
+    if (incoming == NULL || incoming->type != ZJ_OBJECT) {
+        zj_free(incoming);
+        if (error != NULL) *error = zeno_strdup("JSON de plugin inválido.");
+        return NULL;
+    }
+    const char *raw_id = zj_string(zj_object_get(incoming, "id"));
+    char *plugin_id = raw_id != NULL && *raw_id != 0 ? zeno_strdup(raw_id) : zeno_format("plg_%lld", zeno_now_ms());
+    zj_free(incoming);
+    char *payload = zeno_strdup(json);
+    if (strstr(json, "\"enabled\"") == NULL) {
+        /* injeta id (se faltar) e enabled=true: plugins novos nascem ativos */
+        char *patched = zeno_format("{\"id\":\"%s\",\"enabled\":true,%.*s", plugin_id, (int)(strlen(json) - 1), json + 1);
+        free(payload); payload = patched;
+    } else if (raw_id == NULL || *raw_id == 0) {
+        char *patched = zeno_format("{\"id\":\"%s\",%.*s", plugin_id, (int)(strlen(json) - 1), json + 1);
+        free(payload); payload = patched;
+    }
+    char *store_json = bridge_plugins_store_maintain(1, plugin_id, payload, 0, error);
+    int ok = store_json != NULL && bridge_plugins_write_raw(store_json);
+    free(store_json); free(payload);
+    if (!ok) {
+        free(plugin_id);
+        if (error != NULL && *error == NULL) *error = zeno_strdup("Não foi possível salvar o plugin.");
+        return NULL;
+    }
+    char *result = zeno_format("{\"ok\":true,\"id\":\"%s\"}", plugin_id);
+    free(plugin_id);
+    return result;
+}
+
+/* Remove um plugin por id. */
+char *zeno_bridge_plugins_delete(const char *id, char **error) {
+    if (error != NULL) *error = NULL;
+    zeno_bridge_init(NULL);
+    if (id == NULL || *id == 0) {
+        if (error != NULL) *error = zeno_strdup("id é obrigatório.");
+        return NULL;
+    }
+    char *store_json = bridge_plugins_store_maintain(2, id, NULL, 0, error);
+    int ok = store_json != NULL && bridge_plugins_write_raw(store_json);
+    free(store_json);
+    if (!ok) {
+        if (error != NULL && *error == NULL) *error = zeno_strdup("Não foi possível salvar o store.");
+        return NULL;
+    }
+    return zeno_strdup("{\"ok\":true}");
+}
+
+/* Liga/desliga um plugin por id. */
+char *zeno_bridge_plugins_toggle(const char *id, int enabled, char **error) {
+    if (error != NULL) *error = NULL;
+    zeno_bridge_init(NULL);
+    if (id == NULL || *id == 0) {
+        if (error != NULL) *error = zeno_strdup("id é obrigatório.");
+        return NULL;
+    }
+    char *store_json = bridge_plugins_store_maintain(3, id, NULL, enabled, error);
+    int ok = store_json != NULL && bridge_plugins_write_raw(store_json);
+    free(store_json);
+    if (!ok) {
+        if (error != NULL && *error == NULL) *error = zeno_strdup("Não foi possível salvar o store.");
+        return NULL;
+    }
+    return zeno_strdup("{\"ok\":true}");
+}
+
 static ZenoRouter *bridge_build_router(void) {
     ZenoRouter *router = zeno_router_create();
     if (router == NULL) return NULL;
@@ -497,17 +859,12 @@ static int bridge_runtime_build(BridgeRuntime *runtime, char **error) {
     int registered = g_bridge.cfg.agent_mode == ZENO_AGENT_MODE_MINIMAL
         ? zeno_registry_register_minimal(runtime->registry, runtime->sandbox, runtime->memory, g_bridge.cfg.workspace)
         : zeno_registry_register_builtins(runtime->registry, runtime->sandbox, runtime->memory, g_bridge.cfg.workspace);
-    if (registered && g_bridge.cfg.agent_mode != ZENO_AGENT_MODE_MINIMAL) {
-        char *plugins_dir = bridge_join(g_bridge.cfg.workspace, "zeno_plugins");
-        if (plugins_dir != NULL) {
-            (void)zeno_register_studio_tools(runtime->registry, plugins_dir);
-            free(plugins_dir);
-        }
-    }
     if (registered && !bridge_register_memory_link_tool(runtime->registry, error)) {
         bridge_runtime_destroy(runtime);
         return 0;
     }
+    /* Plugins do usuário: ferramentas de código, botões, abas e settings. */
+    if (registered) bridge_register_plugin_tools(runtime->registry, runtime->sandbox);
     if (!registered) {
         if (error != NULL) *error = zeno_strdup("Falha ao registrar as ferramentas do ZenoC.");
         bridge_runtime_destroy(runtime);
@@ -1411,6 +1768,7 @@ char *zeno_bridge_tools_json(void) {
             : zeno_registry_register_builtins(registry, sandbox, memory, g_bridge.cfg.workspace);
         /* memory_link também faz parte do arsenal do agente. */
         if (registered && !bridge_register_memory_link_tool(registry, NULL)) registered = 0;
+        if (registered) bridge_register_plugin_tools(registry, sandbox);
         if (registered) result = zeno_registry_list_json(registry);
     }
     zeno_registry_destroy(registry);

@@ -509,8 +509,13 @@
     activeProjectId: LS.get('oc-clone-active-project', null),
     memoryNotes: LS.get('oc-clone-memory-notes', MEMORY_NOTES),
     memoryEdges: LS.get('oc-clone-memory-edges', MEMORY_EDGES),
-    /* Config visual da rede de memória (cores por tipo, espaçamento, rótulos) */
-    memoryConfig: { mcp: '#4ade80', skill: '#63b3ff', spacing: 1, labels: false, ...LS.get('oc-clone-memory-config', {}) },
+    /* Config visual da rede de memória (brilho por tipo, espaçamento, rótulos) */
+    memoryConfig: (() => {
+      const saved = LS.get('oc-clone-memory-config', {});
+      /* Migração: config antiga usava cores hex (verde/azul) — descarta tons. */
+      if (saved && typeof saved.mcp === 'string' && saved.mcp.startsWith('#')) { delete saved.mcp; delete saved.skill; }
+      return { mcpBright: 92, skillBright: 56, spacing: 1, labels: false, ...saved };
+    })(),
     memoryConfigOpen: false,
     memoryLayoutPending: true,
     noteId: null,
@@ -593,16 +598,30 @@
   };
   const toolOutputLines = (text) => String(text || '').replace(/\r\n/g, '\n').split('\n').slice(0, 200);
 
-  const NOTE_ACCENTS = { note: '#8b7cff', memory: '#65d7c1', mcp: '#4ade80', skill: '#63b3ff', decision: '#f0ad67', pattern: '#e785b9', tool_sequence: '#92d36e' };
+  /* Tons monocromáticos (branco-cinza): brilho varia por tipo do conteúdo.
+   * MCP = brilho configurável (padrão alto/quase branco), Skill = tom médio. */
+  const NOTE_ACCENTS = { note: '#a9b1bd', memory: '#d3d8e1', decision: '#8f97a5', pattern: '#7c8391', tool_sequence: '#c5cbd6' };
   const NOTE_KINDS = { note: 'Note', memory: 'Memory', mcp: 'MCP', skill: 'Skill', decision: 'Decision', pattern: 'Pattern', tool_sequence: 'Pattern', auto: 'Memory' };
   const KIND_FROM_TAG = Object.fromEntries(Object.entries(NOTE_KINDS).map(([kind, tag]) => [tag, kind]));
-  /* Cor do nó: MCP = verde claro, Skill = azul claro (configuráveis); demais tipos
-   * usam o acento padrão ou o cor persistida na nota. */
+  const grayTone = (brightness) => {
+    const b = Math.max(0, Math.min(100, Number(brightness) || 0));
+    const light = Math.round(26 + b * 0.62);
+    return `hsl(214 12% ${light}%)`;
+  };
+  /* Cor do nó: MCP quase branco, Skill cinza claro (brilho configurável);
+   * demais tipos em tons de cinza — a variedade vem de hash do título. */
   const noteAccent = (note) => {
     const kind = note.kind || KIND_FROM_TAG[note.tag] || '';
-    if (kind === 'mcp') return state.memoryConfig.mcp || '#4ade80';
-    if (kind === 'skill') return state.memoryConfig.skill || '#63b3ff';
-    return NOTE_ACCENTS[kind] || note.accent || '#8b7cff';
+    if (kind === 'mcp') return grayTone(state.memoryConfig.mcpBright);
+    if (kind === 'skill') return grayTone(state.memoryConfig.skillBright);
+    if (NOTE_ACCENTS[kind]) return NOTE_ACCENTS[kind];
+    let hash = 7;
+    for (const ch of String(note.title || '')) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+    return grayTone(28 + (hash % 44));
+  };
+  const kindBoost = (note) => {
+    const kind = note.kind || KIND_FROM_TAG[note.tag] || '';
+    return kind === 'mcp' || kind === 'skill' ? 1.6 : 0;
   };
   const prettyJson = (text) => {
     try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return String(text || ''); }
@@ -1503,7 +1522,7 @@
    * (ou globalmente se "Mostrar nomes" estiver ativo na configuração). */
   const tplMemoryNode = (note, degree = 0) => {
     const x = Math.round(note.x * 16), y = Math.round(note.y * 9);
-    const r = Math.round((note.root ? 9 : 5.5) + Math.min(9, degree * 1.8));
+    const r = Math.round((note.root ? 9 : 5.5) + Math.min(9, degree * 1.8) + kindBoost(note));
     const accent = noteAccent(note);
     const showLabel = !!state.memoryConfig.labels;
     const title = note.title.length > 24 ? `${note.title.slice(0, 23)}…` : note.title;
@@ -1587,28 +1606,22 @@
       return `<line data-memory-edge data-from="${esc(from)}" data-to="${esc(to)}" x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" class="memory-edge" style="--memory-edge-delay: ${index * 35}ms"></line>`;
     }).join('');
     const configPopover = `<div class="memory-config-wrap">
-      <button type="button" data-action="memory-config" class="zeno-mini-btn" title="Configurar a rede">${icon('oc-settings-3', 'remixicon h-3 w-3')}Config</button>
       ${state.memoryConfigOpen ? `
       <div class="memory-config-popover" data-memory-config>
-        <div class="memory-config-row"><span class="memory-config-dot" style="--memory-node-accent:${cfg.mcp}"></span>MCP <input type="color" data-memory-config-color="mcp" value="${esc(cfg.mcp)}"></div>
-        <div class="memory-config-row"><span class="memory-config-dot" style="--memory-node-accent:${cfg.skill}"></span>Skill <input type="color" data-memory-config-color="skill" value="${esc(cfg.skill)}"></div>
+        <div class="memory-config-row"><span class="memory-config-dot" style="--memory-node-accent:${grayTone(cfg.mcpBright)}"></span>MCP (brilho) <input type="range" min="20" max="100" step="1" data-memory-config-bright="mcpBright" value="${esc(String(cfg.mcpBright))}"></div>
+        <div class="memory-config-row"><span class="memory-config-dot" style="--memory-node-accent:${grayTone(cfg.skillBright)}"></span>Skill (brilho) <input type="range" min="10" max="90" step="1" data-memory-config-bright="skillBright" value="${esc(String(cfg.skillBright))}"></div>
         <div class="memory-config-row">Espaçamento <input type="range" min="0.7" max="1.9" step="0.1" data-memory-config-range="spacing" value="${esc(String(cfg.spacing))}"></div>
         <div class="memory-config-row"><label class="memory-config-check"><input type="checkbox" data-memory-config-check="labels" ${cfg.labels ? 'checked' : ''}> Mostrar nomes nos nós</label></div>
-        <div class="memory-config-hint">MCP é formatado em JSON · Skill em Markdown · clique no nó para ver o nome</div>
+        <div class="memory-config-hint">MCP = brilho alto · Skill = tom médio · MCP é formatado em JSON · Skill em Markdown · clique no nó para ver o nome</div>
         <button type="button" data-action="memory-relayout" class="zeno-mini-btn">Reorganizar rede</button>
       </div>` : ''}
     </div>`;
     return `<div class="memory-view" data-memory-view>
+      ${configPopover}
       <header class="memory-overlay-heading"><h1>Zeno Agent Memory</h1><p>Your knowledge, notes and skills connected in one living graph.</p></header>
-      <div class="memory-backend-bar">
-        <span class="zeno-status-dot ${state.backendOk ? 'is-on' : ''}"></span>
-        <span>${state.backendOk ? 'ZenoC conectado' : 'Modo local'}</span>
-        <span class="memory-backend-count">${notes.length} nota${notes.length === 1 ? '' : 's'} · ${state.memoryEdges.length} link${state.memoryEdges.length === 1 ? '' : 's'}${state.backendSkills && state.backendSkills.length ? ` · ${state.backendSkills.length} skill${state.backendSkills.length === 1 ? '' : 's'}` : ''}</span>
-        <span class="memory-legend"><span class="memory-legend-item"><span class="memory-config-dot" style="--memory-node-accent:${cfg.mcp}"></span>MCP</span><span class="memory-legend-item"><span class="memory-config-dot" style="--memory-node-accent:${cfg.skill}"></span>Skill</span></span>
-        <span class="flex-1"></span>
-        ${configPopover}
-        <button type="button" data-action="memory-refresh" class="zeno-mini-btn" title="Sincronizar com o agente">${icon('oc-refresh', 'remixicon h-3 w-3')}Atualizar</button>
-        <button type="button" data-action="memory-new" class="zeno-mini-btn" title="Criar nota">${icon('oc-add', 'remixicon h-3 w-3')}Nova nota</button>
+      <div class="memory-corner">
+        <button type="button" data-action="memory-config" class="memory-corner-btn" title="Configurar a rede">${icon('oc-settings-3', 'remixicon h-3.5 w-3.5')}</button>
+        <button type="button" data-action="memory-refresh" class="memory-corner-btn" title="Sincronizar com o agente">${icon('oc-refresh', 'remixicon h-3.5 w-3.5')}</button>
       </div>
       <div class="memory-map-viewport" data-memory-viewport>
         <svg class="memory-map-canvas" data-memory-canvas viewBox="0 0 1600 900" aria-label="Memory knowledge graph">
@@ -2560,6 +2573,7 @@
     });
     $('[data-action="memory-refresh"]', rootEl)?.addEventListener('click', () => { void refreshMemoryFromBackend().then(() => render()); });
     $('[data-action="memory-new"]', rootEl)?.addEventListener('click', () => createMemoryNoteAt(50, 52));
+    $$('[data-action="memory-new-kind"]', rootEl).forEach((button) => button.addEventListener('click', () => createMemoryNoteAt(50, 52, button.dataset.memoryNewKind)));
     /* Configuração da rede (cores MCP/Skill, espaçamento, rótulos) */
     $('[data-action="memory-config"]', rootEl)?.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -2567,8 +2581,8 @@
       render();
     });
     $('[data-memory-config]', rootEl)?.addEventListener('click', (event) => event.stopPropagation());
-    $$('[data-memory-config-color]', rootEl).forEach((input) => input.addEventListener('change', () => {
-      state.memoryConfig[input.dataset.memoryConfigColor] = input.value;
+    $$('[data-memory-config-bright]', rootEl).forEach((input) => input.addEventListener('change', () => {
+      state.memoryConfig[input.dataset.memoryConfigBright] = Number(input.value) || 0;
       LS.set('oc-clone-memory-config', state.memoryConfig);
       render();
     }));
@@ -4631,6 +4645,34 @@
   };
 
   const bindSettingsSection = (rootEl) => {
+    /* Modo de cor: seletor segmentado com ✓ no item escolhido. */
+    $$('[data-color-mode]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      state.colorMode = b.dataset.colorMode;
+      LS.set('oc-clone-color-mode', state.colorMode);
+      applyTheme();
+      refreshSettingsContent(rootEl);
+      render();
+    }));
+    /* Tipo de gráfico do Usage. */
+    $$('[data-usage-chart]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      state.usageChart = b.dataset.usageChart;
+      LS.set('oc-clone-usage-chart', state.usageChart);
+      refreshSettingsContent(rootEl);
+    }));
+    /* Clicar numa conversa do Usage abre ela no workspace. */
+    $$('[data-usage-session]', rootEl).forEach((b) => b.addEventListener('click', () => {
+      const id = b.dataset.usageSession;
+      if (!state.sessions.some((s) => s.id === id)) return;
+      state.activeId = id;
+      state.draftNew = false;
+      state.workspace = 'chat';
+      state.settings = false;
+      LS.set('oc-clone-active', id);
+      persistWorkspace();
+      render();
+    }));
+    /* Appearance/Chat: recarregar temas. */
+    $('[data-action="reload-themes"]', rootEl)?.addEventListener('click', () => { applyTheme(); refreshSettingsContent(rootEl); render(); });
     /* Integração ZenoC: aba Models */
     $('[data-action="models-save"]', rootEl)?.addEventListener('click', async () => {
       const value = (field) => ($(`[data-models-field="${field}"]`, rootEl)?.value || '').trim();
@@ -4870,34 +4912,6 @@
       state.settingsSection = b.dataset.settingsSection;
       refreshSettingsContent(rootEl);
     }));
-    /* Modo de cor: seletor segmentado com ✓ no item escolhido. */
-    $$('[data-color-mode]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      state.colorMode = b.dataset.colorMode;
-      LS.set('oc-clone-color-mode', state.colorMode);
-      applyTheme();
-      refreshSettingsContent(rootEl);
-      render();
-    }));
-    /* Tipo de gráfico do Usage. */
-    $$('[data-usage-chart]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      state.usageChart = b.dataset.usageChart;
-      LS.set('oc-clone-usage-chart', state.usageChart);
-      refreshSettingsContent(rootEl);
-    }));
-    /* Clicar numa conversa do Usage abre ela no workspace. */
-    $$('[data-usage-session]', rootEl).forEach((b) => b.addEventListener('click', () => {
-      const id = b.dataset.usageSession;
-      if (!state.sessions.some((s) => s.id === id)) return;
-      state.activeId = id;
-      state.draftNew = false;
-      state.workspace = 'chat';
-      state.settings = false;
-      LS.set('oc-clone-active', id);
-      persistWorkspace();
-      render();
-    }));
-    /* Appearance/Chat: os selects de tema/idioma/formato/orientação usam o menu acima */
-    $('[data-action="reload-themes"]', rootEl)?.addEventListener('click', () => { applyTheme(); refreshSettingsContent(rootEl); render(); });
     bindSettingsSection(rootEl);
   };
 

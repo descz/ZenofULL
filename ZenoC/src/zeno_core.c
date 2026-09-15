@@ -871,6 +871,32 @@ static int zeno_memory_add_note_locked(ZenoMemory *memory, const char *title,
 }
 int zeno_memory_add_note(ZenoMemory *memory, const char *title, const char *content, const char *kind, const char *scope, const char *tags_json, char **id) { if (memory != NULL) zeno_mutex_lock((ZenoMutex *)&memory->lock); int zeno_result = zeno_memory_add_note_locked(memory, title, content, kind, scope, tags_json, id); if (memory != NULL) zeno_mutex_unlock((ZenoMutex *)&memory->lock); return zeno_result; }
 
+/* Atualiza uma nota existente (campos NULL são preservados) — base da
+ * consolidação de memórias: o agente evolui memórias em vez de criar novas. */
+static int zeno_memory_update_note_locked(ZenoMemory *memory, const char *id,
+                             const char *title, const char *content,
+                             const char *kind, const char *scope, const char *tags_json) {
+    if (memory == NULL || id == NULL || *id == '\0') return 0;
+    for (size_t index = 0; index < memory->note_count; index++) {
+        ZenoMemoryNote *note = &memory->notes[index];
+        if (note->id == NULL || strcmp(note->id, id) != 0) continue;
+        if (title != NULL && *title != '\0') { free(note->title); note->title = zeno_strdup(title); }
+        if (content != NULL && *content != '\0') { free(note->content); note->content = zeno_strdup(content); }
+        if (kind != NULL && *kind != '\0') { free(note->kind); note->kind = zeno_strdup(kind); }
+        if (scope != NULL && *scope != '\0') { free(note->scope); note->scope = zeno_strdup(scope); }
+        if (tags_json != NULL && *tags_json != '\0') {
+            char *error = NULL; ZjNode *tag_node = zj_parse(tags_json, &error);
+            int valid_tags = tag_node != NULL && tag_node->type == ZJ_ARRAY;
+            free(error); zj_free(tag_node);
+            if (valid_tags) { free(note->tags_json); note->tags_json = zeno_strdup(tags_json); }
+        }
+        memory_save(memory);
+        return 1;
+    }
+    return 0;
+}
+int zeno_memory_update_note(ZenoMemory *memory, const char *id, const char *title, const char *content, const char *kind, const char *scope, const char *tags_json) { if (memory != NULL) zeno_mutex_lock((ZenoMutex *)&memory->lock); int zeno_result = zeno_memory_update_note_locked(memory, id, title, content, kind, scope, tags_json); if (memory != NULL) zeno_mutex_unlock((ZenoMutex *)&memory->lock); return zeno_result; }
+
 static char *zeno_memory_search_notes_locked(const ZenoMemory *memory, const char *query, size_t limit) {
     char *result = zeno_strdup("[");
     size_t added = 0;

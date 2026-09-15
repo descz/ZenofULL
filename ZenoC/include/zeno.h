@@ -134,6 +134,10 @@ int zeno_memory_update_session(ZenoMemory *memory, const char *session_id,
 int zeno_memory_add_note(ZenoMemory *memory, const char *title,
                          const char *content, const char *kind,
                          const char *scope, const char *tags_json, char **id);
+int zeno_memory_update_note(ZenoMemory *memory, const char *id,
+                            const char *title, const char *content,
+                            const char *kind, const char *scope,
+                            const char *tags_json);
 char *zeno_memory_search_notes(const ZenoMemory *memory, const char *query,
                                size_t limit);
 char *zeno_memory_list_notes(const ZenoMemory *memory, const char *scope,

@@ -961,11 +961,37 @@ body:has(.memory-view) [data-panel-root] {
 }
 .memory-edge {
   fill: none;
-  stroke: #2dd4a8;
-  stroke-opacity: .3;
-  stroke-width: 1.1;
+  stroke: #ffffff;
+  stroke-opacity: .34;
+  stroke-width: 1.15;
   stroke-linecap: round;
   shape-rendering: geometricPrecision;
+}
+.memory-corner {
+  position: absolute;
+  z-index: 14;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.memory-corner-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgb(255 255 255 / .14);
+  border-radius: 8px;
+  color: rgb(255 255 255 / .62);
+  background: rgb(255 255 255 / .04);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.memory-corner-btn:hover {
+  color: #fff;
+  background: rgb(255 255 255 / .1);
 }
 .memory-node {
   color: #fff;
@@ -1281,19 +1307,10 @@ body:has(.memory-view) [data-panel-root] {
   color: #cfd4de;
   font-size: 11px;
 }
-.memory-config-row input[type="color"] {
-  width: 26px;
-  height: 20px;
-  margin-left: auto;
-  padding: 0;
-  border: 1px solid rgb(255 255 255 / .2);
-  border-radius: 5px;
-  background: transparent;
-  cursor: pointer;
-}
 .memory-config-row input[type="range"] {
   flex: 1;
   margin-left: auto;
+  accent-color: #e6eaf1;
 }
 .memory-config-dot {
   display: inline-block;
@@ -1317,21 +1334,6 @@ body:has(.memory-view) [data-panel-root] {
   color: rgb(255 255 255 / .45);
   font-size: 10px;
   line-height: 1.5;
-}
-.memory-legend {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  margin-left: 6px;
-}
-.memory-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: rgb(255 255 255 / .55);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: .06em;
 }
 .memory-editor-save,
 .memory-editor-discard,
@@ -2579,31 +2581,7 @@ body.zeno-compact #chat-root .chat-message-column { padding-top: 2px; padding-bo
   border-color: color-mix(in srgb, var(--primary, #8b7cff) 55%, var(--border));
   background: color-mix(in srgb, var(--primary, #8b7cff) 12%, transparent);
 }
-.memory-backend-bar {
-  position: absolute;
-  top: 74px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 12;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: min(92vw, 900px);
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--memory-border, rgb(255 255 255 / .12));
-  background: color-mix(in srgb, var(--memory-panel, #0d0d0d) 88%, transparent);
-  backdrop-filter: blur(10px);
-  font-size: 11px;
-  color: var(--memory-muted, #969696);
-}
-.memory-backend-bar .memory-backend-count { opacity: .85; }
-.memory-backend-bar .zeno-mini-btn {
-  border-color: var(--memory-border, rgb(255 255 255 / .12));
-  color: var(--memory-foreground, #f2f2f2);
-  background: transparent;
-}
-.memory-backend-bar .zeno-mini-btn:hover { background: rgb(255 255 255 / .08); }
+
 
 /* ---------- settings: grid de blocos (Projects / Remote / Plugins) ---------- */
 .zeno-settings-grid {

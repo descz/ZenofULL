@@ -1,61 +1,46 @@
-# Zeno Agent — UI + servidor em C
+# ZenofULL — Zeno Agent (GUI + backend em C)
 
-Clone estático da interface do Zeno Agent. O painel Browser abre uma **guia dedicada "ZENO AGENT"** no seu próprio navegador — sem headless, sem proxy, sem iframe.
+Agente de engenharia de software autônomo (ZenoC, runtime em C11) integrado a uma GUI completa: chat com streaming, memória em rede neural, sistema de plugins e MCPs persistentes.
 
-## Como usar
+## Build
+
+```
+# 1. Build do runtime ZenoC (libzenoc.a)
+cd ZenoC
+cmake -S . -B build/preset-offline-debug
+cmake --build build/preset-offline-debug
+
+# 2. Build do servidor (server.c + ponte + runtime)
+cd ..
+build-server.cmd
+```
+
+## Run
 
 ```
 zeno-server.exe          (porta padrão 8080)
 ```
 
-Abra http://localhost:8080
+Abra `http://localhost:8080` — o `index.html` é servido automaticamente.
 
-Para recompilar:
-```
-gcc -O2 -o zeno-server.exe server.c -lws2_32
-```
+## Arquitetura
 
-Sem dependências: C puro com WinSock. Não precisa de Node, Python, libcurl nem navegador adicional.
+| Camada | O que faz |
+|---|---|
+| `server.c` | HTTP local (WS2), SSE, rotas `/api/zenoc/*` |
+| `zeno-bridge.c` | Ponte GUI ↔ runtime: chat, memória, skills, modelos, **plugins** (`.zeno/plugins.json`) |
+| `ZenoC/src` | Runtime do agente: LLM router (OpenAI-compat), tools com sandbox, memória durável, approval |
 
-## Como o Browser funciona
+## Funcionalidades
 
-1. Abra o painel **Browser** e clique em **"Abrir guia ZENO AGENT"** (ou digite uma URL e clique em **Go**)
-2. O navegador cria uma guia/janela com o nome **ZENO AGENT**
-3. Cada **Go** seguinte reutiliza a mesma guia (o navegador agrupa pelo `name` da janela)
+- **Chat** com timeline real: pensamento → ferramentas → texto, renderizado na ordem de execução
+- **Memória**: grafo estilo rede neural; notas, skills e MCPs; MCP verde-claro/Skill azul configuráveis, ligações brancas; agente consolida memórias (atualiza/vincula em vez de criar por chat)
+- **Plugins** (backend em C): ferramentas de código (templates shell), botões no chat, abas na sidebar, campos nas configurações — persistidos em `.zeno/plugins.json`, registrados dinamicamente no registry do agente
+- **MCPs persistentes**: salvos como memória `kind=mcp` e reutilizáveis via `mcp_call`
+- **Configuração de LLM** na aba Models (provider OpenAI-compatível, busca de modelos da API)
 
-Controles do painel atuam na guia:
-- **Go** → navega a guia para a URL
-- **Back/Forward** → histórico mantido pelo painel (cross-origin não expõe o history da guia, então controlamos o nosso)
-- **Reload** → re-navega para a URL atual
-- **Home** → volta ao DuckDuckGo Lite
+## Config de provider
 
-Se o navegador bloquear o pop-up, permita pop-ups para o site.
+Na primeira execução o agente cria `zeno-agent.json` (fora do repo). Configure em **Settings → Models**: provider, Base URL, API key e modelos.
 
-## Barra de endereço
-
-- `site.com`, `foo.net/pagina`, `sub.dominio.site:8080` → vai direto para a URL
-- `localhost:3000/app`, `192.168.0.10:8080` → vai direto (http)
-- Qualquer outra coisa → busca no DuckDuckGo Lite
-
-## O que mais funciona
-
-- Layout completo: sidebar, topbar, command palette, workspaces
-- 42 temas (claro/escuro) com persistência
-- Chat simulado com markdown, syntax highlight, thinking blocks, tool calls
-- Painéis: Context, Stack, Terminal, Project notes, Chat, Browser (guia dedicada)
-- Memory map com grafo de notas
-- Settings funcionais (Appearance, Chat, Notifications, Voice, Shortcuts, Projects)
-- Configurações persistidas em `zeno-config.json` no servidor + localStorage
-
-## O que não funciona
-
-- Sem IA real: respostas do chat são mock
-- Sem voz: STT/TTS precisam de chave de serviço externa
-- Terminal do painel é simulado
-
-## Estrutura
-
-- `server.c` — servidor HTTP em C: estáticos + API de config (`/api/config`)
-- `zeno-server.exe` — binário compilado
-- `index.html` / `app.js` / CSS — frontend vanilla
-- `black-hole-threejs.html` — background animado (iframe local)
+> Segurança: `zeno-agent.json`, `zeno-config.json` e memórias são runtime local e não são versionados.
